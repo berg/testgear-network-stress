@@ -152,6 +152,57 @@ class Resolved:
         return pyvisa.ResourceManager(self.locator)
 
 
+class TreeError(RuntimeError):
+    """A pyvisa-py tree was named that cannot be used."""
+
+
+def use_pyvisa_py_tree(tree: str | os.PathLike) -> Path:
+    """Put a pyvisa-py checkout ahead of whatever is installed.
+
+    Comparing branches is the point of this suite, so pointing it at a tree
+    checked out elsewhere has to be one obvious thing rather than a PYTHONPATH
+    incantation the caller has to know wins over an editable install.
+
+    Two rules here are load-bearing:
+
+    - A tree that does not exist, or has no `pyvisa_py/` in it, is a hard
+      error naming the path. Falling through to whatever happens to be
+      installed would produce a run that looks fine and reports the wrong
+      thing, and the provenance block would faithfully record a tree nobody
+      asked for. Silently testing the wrong tree is worse than not running.
+
+    - PYTHONPATH is set as well as `sys.path`, so subprocesses inherit it.
+      `run_all.sh` spawns one process per script, and a tree that applied only
+      to the parent would mean the suite runner and the scripts it launches
+      disagreed about what was under test.
+    """
+    path = Path(tree).expanduser().resolve()
+    if not path.exists():
+        raise TreeError(f"no such pyvisa-py tree: {path}")
+    if not (path / "pyvisa_py" / "__init__.py").exists():
+        raise TreeError(
+            f"{path} does not look like a pyvisa-py checkout "
+            f"(no pyvisa_py/__init__.py in it)"
+        )
+
+    # Importing pyvisa_py before this point would pin the old module in
+    # sys.modules and make the switch silently ineffective.
+    already = sys.modules.get("pyvisa_py")
+    if already is not None:
+        loaded = Path(already.__file__).parent.parent
+        if loaded != path:
+            raise TreeError(
+                f"pyvisa_py was already imported from {loaded}, so switching "
+                f"to {path} would have no effect. Name the tree before any "
+                f"import of it."
+            )
+
+    sys.path.insert(0, str(path))
+    existing = os.environ.get("PYTHONPATH")
+    os.environ["PYTHONPATH"] = f"{path}{os.pathsep}{existing}" if existing else str(path)
+    return path
+
+
 def resolve(spec_id: str) -> Resolved:
     """Find `spec_id`, reporting rather than raising when it is missing."""
     # An explicit path wins over any name, so an install in an unusual place
@@ -258,14 +309,19 @@ def describe_environment(resolved: Resolved) -> str:
     return "\n".join(f"  {line}" for line in lines)
 
 
-def pyvisa_py_tree_note() -> str | None:
+def pyvisa_py_tree_note(chosen: Path | None = None) -> str | None:
     """Warn when PYTHONPATH shadows the installed pyvisa-py.
 
-    `run_all.sh` puts a checkout on PYTHONPATH so branches can be compared
-    without reinstalling, which is convenient and completely invisible in the
-    output unless something says so. A result attributed to the wrong tree is
-    worse than no result.
+    A checkout on PYTHONPATH takes precedence over an editable install, which
+    is convenient and completely invisible in the output unless something says
+    so. A result attributed to the wrong tree is worse than no result.
+
+    An inherited PYTHONPATH is worth flagging; one this run set itself via
+    --pyvisa-py is not, because the provenance block already names that tree
+    and the commit it is on.
     """
+    if chosen is not None:
+        return None
     path = os.environ.get("PYTHONPATH")
     if not path:
         return None

@@ -22,6 +22,7 @@ import argparse
 import contextlib
 import os
 import sys
+from pathlib import Path
 
 from . import backends
 
@@ -35,6 +36,15 @@ def build_parser(description: str, protocol: str | None = None) -> argparse.Argu
         default=os.environ.get("TESTGEAR_BACKEND", "py"),
         help="VISA implementation under test: py, ni, rs, keysight, tek, sim, "
         "or a path to a VISA shared library (env: TESTGEAR_BACKEND)",
+    )
+    parser.add_argument(
+        "--pyvisa-py",
+        metavar="TREE",
+        default=os.environ.get("TESTGEAR_PYVISA_PY"),
+        help="path to a pyvisa-py checkout to test instead of whatever is "
+        "installed. Takes precedence over an editable install, applies to "
+        "subprocesses too, and fails immediately if the path is not a "
+        "pyvisa-py tree (env: TESTGEAR_PYVISA_PY)",
     )
     parser.add_argument(
         "-r",
@@ -79,6 +89,23 @@ def build_parser(description: str, protocol: str | None = None) -> argparse.Argu
     return parser
 
 
+def apply_tree(args):
+    """Honour --pyvisa-py before anything imports pyvisa_py.
+
+    Returns the resolved tree, or None. Exits rather than raising: a bad path
+    is a setup mistake, and the useful output is the path that was wrong, not
+    a traceback through the harness.
+    """
+    tree = getattr(args, "pyvisa_py", None)
+    if not tree:
+        return None
+    try:
+        return backends.use_pyvisa_py_tree(tree)
+    except backends.TreeError as exc:
+        print(f"--pyvisa-py: {exc}", file=sys.stderr)
+        sys.exit(4)
+
+
 def resolve_backend(args) -> backends.Resolved:
     """The backend named on the command line, or exit saying why not.
 
@@ -86,6 +113,7 @@ def resolve_backend(args) -> backends.Resolved:
     letting the run continue produces a report whose columns silently differ
     in what they mean.
     """
+    apply_tree(args)
     resolved = backends.resolve(args.backend)
     if not resolved.available:
         print(f"backend {args.backend!r} is not available: {resolved.reason}", file=sys.stderr)
@@ -105,7 +133,8 @@ def context(args, resolved: backends.Resolved, resource: str) -> dict:
     """
     info = backends.provenance(resolved)
     info["resource"] = resource
-    note = backends.pyvisa_py_tree_note()
+    tree = getattr(args, "pyvisa_py", None)
+    note = backends.pyvisa_py_tree_note(Path(tree) if tree else None)
     if note:
         info["warning"] = note
     return info

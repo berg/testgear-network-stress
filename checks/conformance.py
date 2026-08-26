@@ -299,12 +299,28 @@ def check_close_isolation():
         )
 
 
-@check("concurrent queries on separate sessions stay in step", rule="VPP-4.3 3.1.3")
+@check("concurrent queries on separate sessions stay in step",
+       rule="VPP-4.3 3.1.3", protocols=("hislip",))
 def check_concurrent_sessions():
     """A status query racing a write is how the _rmt data race presented.
 
     It showed up as the instrument answering the *next* command with
     -410 Query INTERRUPTED, about once per 20,000 concurrent status queries.
+
+    HiSLIP only, and the reason is a genuine difference between the two
+    transports rather than an accident of this suite. HiSLIP's server holds
+    the bus across the write and the read of one query, because the protocol
+    pushes replies and gives it no explicit read request to honour. VXI-11
+    carries `device_write` and `device_read` as separate RPCs, so it
+    deliberately does *not* fuse them -- and two unlocked sessions querying
+    one instrument then interleave: both writes land, the first read drains
+    the whole output queue, and the second read finds nothing and waits out
+    its timeout.
+
+    That is correct GPIB behaviour on both sides, and asserting otherwise
+    would be asserting that unlocked concurrent access to a single instrument
+    is safe, which it is not on a real bus either. The VXI-11 statement worth
+    making is the locked one, below.
     """
     errors_seen: list[str] = []
 
@@ -328,6 +344,43 @@ def check_concurrent_sessions():
     assert not alive, f"{len(alive)} worker threads never finished"
     assert not errors_seen, f"concurrent sessions desynchronised: {errors_seen[:3]}"
     return "4 sessions x 20 query+poll cycles"
+
+
+@check("a lock serialises concurrent sessions", rule="VPP-4.3 3.6.2.1")
+def check_locked_concurrency():
+    """What VXI-11 guarantees where the unlocked case cannot.
+
+    A lock makes the write/read pair atomic against other sessions, which is
+    exactly the guarantee the unlocked case lacks. If this fails, locking is
+    not actually excluding anyone.
+    """
+    errors_seen: list[str] = []
+
+    def worker(n: int):
+        try:
+            with open_inst() as inst:
+                for _ in range(n):
+                    inst.lock_excl(10000)
+                    try:
+                        reply = inst.query("*IDN?").strip()
+                        if "," not in reply:
+                            errors_seen.append(f"bad reply {reply!r}")
+                    finally:
+                        inst.unlock()
+        except Exception as exc:  # noqa: BLE001
+            errors_seen.append(f"{type(exc).__name__}: {exc}")
+
+    threads = [threading.Thread(target=worker, args=(10,)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    alive = [t for t in threads if t.is_alive()]
+    assert not alive, f"{len(alive)} worker threads never finished"
+    assert not errors_seen, (
+        f"locked concurrent queries still interleaved: {errors_seen[:3]}"
+    )
+    return "4 sessions x 10 locked query cycles"
 
 
 @check("the error queue is clean after a normal exchange", rule="SCPI-99 21.8")
