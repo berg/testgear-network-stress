@@ -67,6 +67,15 @@ pub struct Device {
     pub idn: String,
     /// Output queue. Drives MAV, drained by reads.
     output: VecDeque<u8>,
+    /// Bytes received so far for a program message that is not yet complete.
+    ///
+    /// A GPIB write is not automatically a whole message: the message ends at
+    /// EOI or at the EOS character, and a controller may split one across
+    /// several writes. Executing each write as if it were complete makes a
+    /// client that legitimately splits a message -- which is exactly what
+    /// clearing VI_ATTR_SEND_END_EN asks for -- look like it is corrupting
+    /// the stream.
+    input: Vec<u8>,
     /// SCPI error queue, oldest first (SCPI-99 §21.8).
     errors: VecDeque<(i32, String)>,
     sre: u8,
@@ -94,6 +103,7 @@ impl Default for Device {
         Self {
             idn: DEFAULT_IDN.to_string(),
             output: VecDeque::new(),
+            input: Vec::new(),
             errors: VecDeque::new(),
             sre: 0,
             ese: 0,
@@ -159,6 +169,7 @@ impl Device {
     /// (IEEE 488.2 §5.6); `*RST` is the fuller reset.
     pub fn clear_io(&mut self) {
         self.output.clear();
+        self.input.clear();
     }
 
     /// Script an answer for `query`, or remove one with `None`.
@@ -190,6 +201,7 @@ impl Device {
 
     pub fn reset(&mut self) {
         self.output.clear();
+        self.input.clear();
         self.errors.clear();
         self.esr = 0;
         self.user_stb = 0;
@@ -396,7 +408,24 @@ impl GpibBackend for VirtualInstrument {
         if !self.devices.contains_key(&pad) {
             bail!("no instrument at primary address {pad}");
         }
-        let text = String::from_utf8_lossy(data).to_string();
+
+        // Accumulate until the message is actually terminated. EOI ends it;
+        // so does a newline, which is how an instrument with EOS enabled sees
+        // the end of a message that carried no EOI.
+        let complete = send_eoi || data.contains(&b'\n');
+        {
+            let dev = self.device_mut(pad)?;
+            dev.input.extend_from_slice(data);
+            if !complete {
+                return Ok(());
+            }
+        }
+
+        let message = {
+            let dev = self.device_mut(pad)?;
+            std::mem::take(&mut dev.input)
+        };
+        let text = String::from_utf8_lossy(&message).to_string();
         // IEEE 488.2 §7.6.2: a program message is units separated by ';'.
         for unit in text.trim_end_matches(['\n', '\r']).split(';') {
             self.execute(pad, unit)?;
@@ -413,6 +442,7 @@ impl GpibBackend for VirtualInstrument {
             .get(&pad)
             .map(|d| d.silence)
             .unwrap_or(Silence::Timeout);
+        let (eos_char, eos_on) = self.eos;
         let dev = self.device_mut(pad)?;
 
         if dev.output.is_empty() {
@@ -434,11 +464,23 @@ impl GpibBackend for VirtualInstrument {
             };
         }
 
-        let take = max_len.min(dev.output.len());
+        // Stop at the EOS character when one is armed. A real adapter ends the
+        // read on it, which is what lets a client ask for one line of a
+        // multi-line reply and come back for the rest; a backend that ignores
+        // eos hands the whole thing over in one read and makes the client look
+        // like it is not honouring VI_ATTR_TERMCHAR.
+        let mut take = max_len.min(dev.output.len());
+        if eos_on {
+            if let Some(at) = dev.output.iter().take(take).position(|b| *b == eos_char) {
+                take = at + 1;
+            }
+        }
         let out: Vec<u8> = dev.output.drain(..take).collect();
         // EOI rides the last byte of the message. If the queue still holds
         // bytes, this was a partial read and EOI stays low, which is what
-        // drives the servers' chunking paths.
+        // drives the servers' chunking paths -- and is also what distinguishes
+        // a read that stopped on the EOS character from one that reached the
+        // end of the message.
         let eoi = dev.output.is_empty();
         self.update_srq(pad);
         self.observed.push(Event::Read { pad, data: out.clone(), eoi });

@@ -31,17 +31,48 @@ QUEUE = constants.EventMechanism.queue
 HANDLER = constants.EventMechanism.handler
 
 
+class _NotImplemented:
+    """Stand-in status for an operation that raised NotImplementedError.
+
+    A VISA operation that is not supported is supposed to answer
+    `VI_ERROR_NSUP_OPER`; raising a bare Python exception out of the library
+    is an API-contract break in its own right, and one worth reporting rather
+    than crashing on. Comparing unequal to every StatusCode means a check
+    that expected success fails with this printed, which is exactly the
+    right outcome.
+    """
+
+    def __repr__(self) -> str:
+        return "NotImplementedError (no VISA status)"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, _NotImplemented)
+
+    def __hash__(self) -> int:
+        return hash("_NotImplemented")
+
+
+NOT_IMPLEMENTED = _NotImplemented()
+
+
 def call(fn, *args, **kwargs):
     """Call a visalib operation, returning ``(value, status)``.
 
     Backends raise on a non-success status, which gets in the way when the
     status is exactly what is under test. Turn it back into a return value.
     ``value`` is None for operations that only produce a status.
+
+    A `NotImplementedError` escaping the backend becomes NOT_IMPLEMENTED
+    rather than propagating: pyvisa-py raises it from `viFlush` on VXI-11
+    sessions, and letting that kill the process costs every remaining check
+    in the file to report one gap.
     """
     try:
         result = fn(*args, **kwargs)
     except errors.VisaIOError as exc:
         return None, exc.error_code
+    except NotImplementedError:
+        return None, NOT_IMPLEMENTED
     if isinstance(result, tuple):
         return result[0], result[-1]
     return None, result
@@ -189,3 +220,89 @@ def supports(inst, query: str) -> bool:
         drain_errors(inst)
         return False
     return True
+
+
+#: Instrument-specific setup that makes a large reply available, keyed by a
+#: fragment of *IDN?. Applied only when --prepare is passed.
+#:
+#: FETC? rather than READ?: both return the same size, but READ? takes a fresh
+#: measurement each time, so two reads of it differ in content while matching
+#: in length -- which looks exactly like a transport fault and is not one.
+PREPARE_RECIPES = {
+    "34401A": {
+        "commands": [
+            "*CLS",
+            "CONF:VOLT:DC 10",
+            "VOLT:DC:NPLC 0.02",
+            "TRIG:SOUR IMM",
+            "SAMP:COUN 200",
+            "INIT",
+        ],
+        "big_query": "FETC?",
+        "note": "200 stored readings, about 3.2 kB from FETC?",
+        "timeout": 30000,
+    },
+}
+
+
+def prepare_instrument(inst, stats):
+    """Apply a known setup so the large-reply checks can run.
+
+    Returns the query to use, or None if this instrument has no recipe. Says
+    exactly what it is about to change, because it changes the measurement
+    configuration and nothing else in this suite does -- which is also why it
+    is opt-in behind --prepare rather than automatic.
+    """
+    try:
+        idn = inst.query("*IDN?").strip()
+    except Exception:  # noqa: BLE001
+        return None
+
+    recipe = next((r for key, r in PREPARE_RECIPES.items() if key in idn), None)
+    if recipe is None:
+        stats.note(f"--prepare: no recipe for {idn}, leaving it alone")
+        return None
+
+    stats.note(
+        f"--prepare: reconfiguring the instrument ({recipe['note']}). "
+        f"This changes its measurement setup: {'; '.join(recipe['commands'])}"
+    )
+    for command in recipe["commands"]:
+        inst.write(command)
+    if inst.timeout < recipe["timeout"]:
+        inst.timeout = recipe["timeout"]
+        stats.note(f"--prepare: raised the timeout to {recipe['timeout']} ms")
+    drain_errors(inst)
+    return recipe["big_query"]
+
+
+def resolve_big_query(args, server, inst, stats) -> str | None:
+    """Which large-response query to use here, or None if there is not one.
+
+    Against the mock this is always available. Against real hardware it is
+    whatever the caller named, and if the instrument does not implement it the
+    large-reply checks skip -- loudly, because those checks stayed skipped
+    against a 34401A through an entire suite's development without anyone
+    noticing.
+    """
+    if getattr(args, "prepare", False):
+        prepared = prepare_instrument(inst, stats)
+        if prepared:
+            return prepared
+
+    if args.big_query:
+        query = args.big_query
+    elif server is not None:
+        return "TEST:BIG?"          # the mock always has one
+    else:
+        query = "*LRN?"
+
+    if supports(inst, query):
+        return query
+
+    stats.skip(
+        f"the large-response checks: {query} is not usable here. Pass "
+        f"--big-query to name one that works, or --prepare if this "
+        f"instrument has a recipe"
+    )
+    return None

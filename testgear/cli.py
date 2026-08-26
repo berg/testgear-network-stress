@@ -80,6 +80,13 @@ def build_parser(description: str, protocol: str | None = None) -> argparse.Argu
         "name one the instrument implements or those checks skip",
     )
     parser.add_argument(
+        "--prepare",
+        action="store_true",
+        help="configure the instrument so that a large-reply query exists. "
+        "OFF by default and deliberately so: it changes the measurement "
+        "setup, which nothing else in this suite does. See PREPARE_RECIPES",
+    )
+    parser.add_argument(
         "--no-proxy",
         action="store_true",
         help="run the mock server without its fault-injecting proxy. "

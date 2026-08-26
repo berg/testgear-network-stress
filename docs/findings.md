@@ -68,6 +68,27 @@ Reproduce:
 # "a non-default trigger protocol is refused cleanly"
 ```
 
+### viFlush raises NotImplementedError out of a VXI-11 session
+
+**Status:** open. Both trees.
+
+`viFlush` on a VXI-11 session raises a bare Python `NotImplementedError` from
+`sessions.py`. An operation a backend does not implement is supposed to answer
+`VI_ERROR_NSUP_OPER`; a Python exception crossing the VISA boundary is a
+contract break independent of whether flush itself is implemented, because a
+caller has no reason to be catching it. In this suite it killed the run and
+took the remaining 30 checks with it until the harness was taught to trap it.
+
+The HiSLIP session implements flush and returns a status.
+
+### VI_ATTR_IO_PROT is not readable on a VXI-11 session
+
+**Status:** open, minor. Both trees.
+
+`VI_ATTR_IO_PROT` reads back on a HiSLIP session and answers
+`VI_ERROR_NSUP_ATTR` on a VXI-11 one, though VPP-4.3 defines it for INSTR
+resources generally.
+
 ---
 
 ## Server-side

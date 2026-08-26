@@ -228,7 +228,16 @@ def main() -> int:
             st = visa.status(
                 lib.flush, sess, constants.BufferOperation.discard_read_buffer
             )
-            stats.check(st == StatusCode.success, f"viFlush {st!r}")
+            # An unsupported operation must report VI_ERROR_NSUP_OPER, not
+            # raise out of the library: a caller cannot catch what it has no
+            # reason to expect, and a Python-level exception crossing the VISA
+            # boundary is a contract break independent of whether flush is
+            # implemented.
+            stats.check(
+                st in (StatusCode.success, StatusCode.error_nonsupported_operation),
+                f"viFlush reports a VISA status, got {st!r}",
+                rule="VPP-4.3 3.2.4",
+            )
 
             # -- attributes ---------------------------------------------------
             attributes = COMMON_ATTRIBUTES
