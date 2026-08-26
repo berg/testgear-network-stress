@@ -1,50 +1,52 @@
 # Still to do
 
-Roughly in the order it makes sense to tackle. Nothing here is started.
+Everything originally on this list is done: the nine numbered scripts and both
+conformance suites are ported, `--pyvisa-py` points at an out-of-tree checkout,
+`compare.py` produces the cross-backend matrix, HTML reporting exists, the
+reproducers are in place, and the open results are classified in
+[`findings.md`](findings.md).
 
-## Port the rest of the checks
+What is left is what running it turned up.
 
-The bulk of the original suites, ~5,000 lines across two directories:
+## Get a second implementation into the matrix
 
-- The 9 numbered HiSLIP scripts (`01_smoke` .. `09_remote_local`): query
-  storms, large reads, SRQ storms via queue and handler, concurrency and leak
-  checks, lock cycling and contention, `viTerminate` against blocked reads,
-  device clear mid-message, the randomised soak, REN/GTR/LLO verified by
-  effect rather than by status code.
-- The full 30-check VXI-11 conformance set: error codes, operation flags,
-  locking, liveness, session behaviour.
-- `reproducers/`: the `diag_*` bisection scripts, as minimal repros for
-  specific findings rather than maintained checks.
-- `run_all.sh`.
+The comparison machinery works and has only ever been run with pyvisa-py in it
+-- one column against another checkout of itself. Every disparity claim in
+`findings.md` is currently "pyvisa-py disagrees with the spec", which is a
+weaker argument than "pyvisa-py disagrees with NI-VISA".
 
-## Cross-backend comparison
+NI-VISA and R&S VISA both have macOS builds and both are free. Installing
+either and running `./compare.py --backends py,ni --protocol vxi11` would
+settle several open entries at once -- in particular whether the ~11s floor on
+a stalled connection and the unacknowledged `device_intr_srq` are pyvisa-py's
+alone.
 
-`compare.py`: run the same checks against several backends and emit the
-disparity matrix. The JSON report plumbing is already in place for it; what is
-missing is the runner and the rendering.
+## Take the findings upstream
 
-## HTML reporting output
+Five open client-side entries, in the order they are worth raising:
 
-A run currently produces terminal output and, with `--report`, a JSON blob.
-Neither is what you want to hand somebody: the terminal output scrolls off,
-and the JSON is a serialisation format rather than something to read.
+1. `maxRecvSize` of zero wedges a VXI-11 session forever. A bounds check is
+   the whole fix, and an unkillable loop inside a library call is the most
+   serious thing here.
+2. VXI-11 interrupts are unacknowledged, capping service requests at one per
+   second against a server that waits for the reply.
+3. A stalled connection reports `VI_ERROR_IO` about 11s late.
+4. `viFlush` raises `NotImplementedError` out of a VXI-11 session.
+5. `viAssertTrigger` accepts a trigger protocol VXI-11 cannot express, and
+   `VI_ATTR_IO_PROT` is unreadable there.
 
-Wanted: an HTML report rendered from the same structured `Result` records the
-JSON already carries, so the two never disagree about what happened.
+Each has a reproducer that exits non-zero while it still stands, so a patch can
+be checked against it directly.
 
-- One run: checks grouped as they are in the source, each with its outcome,
-  its cited rule, its duration and its detail line. Failures readable without
-  expanding anything; passes collapsible.
-- The provenance block up top -- backend, pyvisa-py tree and commit, python,
-  platform, resource -- since a report that cannot name what produced it is
-  not evidence.
-- Skips visible as their own state, not styled as a muted pass. The whole
-  reason skips are tracked separately is that they read like passes at a
-  glance, and colour is exactly where that mistake gets made again.
-- Several runs: the disparity matrix from `compare.py` as a table, checks
-  down the side and backends across the top, with the cells that disagree
-  being the thing the eye lands on first.
+## Smaller things
 
-Self-contained output -- one file, no external assets -- so it can be
-attached to an upstream issue or opened from a USB stick on a bench machine
-with no network.
+- The HiSLIP side has no equivalent of `vxi11_conformance.py`. The RPC-level
+  fault injector is VXI-11 only; the HiSLIP message framing would need its own,
+  and there are conditions -- a message type the client does not expect, a
+  wrong message-parameter field -- that nothing currently reaches.
+- `08_soak.py` is excluded from `compare.py`, correctly: a randomised workload
+  compares badly. A seeded, fixed-length variant that produced the same
+  operation sequence on every backend would compare fine and is not hard.
+- The suite has never run on Linux or Windows. Nothing in it is
+  platform-specific by design, which is exactly the kind of belief that turns
+  out to be wrong the first time somebody tries.

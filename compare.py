@@ -101,6 +101,10 @@ def merge(reports: list[dict], label: str) -> dict:
         for result in rep.get("results", []):
             entry = dict(result)
             entry["name"] = f"{script}: {result['name']}"
+            # Match on the masked key, display the full name. A check whose
+            # message carries its measurements would otherwise split into one
+            # row per backend, each showing a gap where the others answered.
+            entry["key"] = f"{script}: {result.get('key', result['name'])}"
             merged["results"].append(entry)
         merged["notes"].extend(rep.get("notes", []))
     return merged
@@ -206,37 +210,40 @@ def main() -> int:
         return 2
 
     # -- the matrix ---------------------------------------------------------
-    names: list[str] = []
+    keys: list[str] = []
+    display: dict[str, str] = {}
     seen = set()
     for column in merged_columns:
         for result in column["results"]:
-            if result["name"] not in seen:
-                seen.add(result["name"])
-                names.append(result["name"])
-    lookups = [{r["name"]: r for r in c["results"]} for c in merged_columns]
+            key = result["key"]
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+                display[key] = result["name"]
+    lookups = [{r["key"]: r for r in c["results"]} for c in merged_columns]
 
-    width = max((len(n) for n in names), default=10)
+    width = max((len(display[k]) for k in keys), default=10)
     width = min(width, 78)
     header = "  ".join(c["label"][:12].ljust(12) for c in merged_columns)
     print(f"\n{'check'.ljust(width)}  {header}")
     print("-" * (width + 2 + len(header)))
 
     disagreements = 0
-    for name in names:
+    for key in keys:
         cells = []
         outcomes = set()
         for lookup in lookups:
-            result = lookup.get(name)
+            result = lookup.get(key)
             outcome = result["outcome"] if result else "-"
             outcomes.add(outcome)
             cells.append(outcome.ljust(12))
         differs = len(outcomes) > 1
         disagreements += differs
         marker = "<" if differs else " "
-        print(f"{name[:width].ljust(width)}  {'  '.join(cells)}{marker}")
+        print(f"{display[key][:width].ljust(width)}  {'  '.join(cells)}{marker}")
 
     print(
-        f"\n{len(names)} checks, {disagreements} where the implementations "
+        f"\n{len(keys)} checks, {disagreements} where the implementations "
         f"disagree (marked <)"
     )
 

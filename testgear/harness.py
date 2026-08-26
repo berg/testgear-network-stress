@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import sys
 import threading
 import time
@@ -36,6 +37,41 @@ class Skip(Exception):
     """Raised by a check that cannot run in this configuration."""
 
 
+#: Parts of a check name that vary between runs without changing what the
+#: check *is*: status-code reprs, measured numbers, quoted values, and the
+#: bracketed lists of sample failures.
+_VARIABLE = re.compile(
+    r"""
+      <[A-Za-z_]+\.[^>]*>          # <StatusCode.success: 0> and friends
+    | \[[^\]]*\]                   # ['a', 'b'] sample lists
+    | '[^']*' | "[^"]*"           # quoted values
+    | \b\d+(?:\.\d+)?\b          # measurements and counts
+    | \b(?:None|True|False)\b    # the value a backend returned, or did not
+    """,
+    re.VERBOSE,
+)
+
+
+def stable_key(name: str) -> str:
+    """An identity for a check that survives its measurements changing.
+
+    Check names here carry their evidence -- "the final chunk (chunk=64)
+    reports VI_SUCCESS, got <StatusCode.success: 0>" -- which is exactly what
+    you want when reading one run and exactly wrong when lining several up
+    against each other: two backends reporting different status codes produce
+    two different names, so the row splits in two and each column shows a gap
+    where the other one answered.
+
+    Masking the variable parts gives a key that matches across runs while the
+    displayed name keeps its evidence. It is a heuristic, and the failure mode
+    is benign in both directions: two genuinely different checks that mask to
+    the same key would merge (they would have to be near-identically worded),
+    and a name whose *wording* changes between versions splits, which is
+    honest -- it is a different check.
+    """
+    return _VARIABLE.sub("*", name).strip()
+
+
 @dataclasses.dataclass
 class Result:
     name: str
@@ -47,7 +83,9 @@ class Result:
     rule: str = ""
 
     def as_dict(self) -> dict:
-        return dataclasses.asdict(self)
+        data = dataclasses.asdict(self)
+        data["key"] = stable_key(self.name)
+        return data
 
 
 def check(name: str, rule: str = "", protocols: Iterable[str] = ("vxi11", "hislip")):

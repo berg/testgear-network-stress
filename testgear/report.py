@@ -202,25 +202,30 @@ def render_matrix(runs: list[dict], title: str = "Backend comparison") -> str:
     # Union of check names, keeping the order of the first run that has each,
     # so the table reads in the order the checks were written.
     order: list[str] = []
+    display: dict[str, str] = {}
     seen = set()
     for run in runs:
         for result in run.get("results", []):
-            if result["name"] not in seen:
-                seen.add(result["name"])
-                order.append(result["name"])
+            key = result.get("key", result["name"])
+            if key not in seen:
+                seen.add(key)
+                order.append(key)
+                display[key] = result["name"]
 
     by_run = [
-        {result["name"]: result for result in run.get("results", [])} for run in runs
+        {result.get("key", result["name"]): result for result in run.get("results", [])}
+        for run in runs
     ]
 
     rows = []
     differing = 0
-    for name in order:
+    for key in order:
+        name = display[key]
         cells = []
         outcomes = set()
         rule = ""
         for lookup in by_run:
-            result = lookup.get(name)
+            result = lookup.get(key)
             if result is None:
                 cells.append('<td class="cell none">&mdash;</td>')
                 outcomes.add(None)
@@ -251,8 +256,8 @@ def render_matrix(runs: list[dict], title: str = "Backend comparison") -> str:
         + _tally(
             sum(
                 1
-                for n in order
-                if all(l.get(n, {}).get("outcome") == PASS for l in by_run)
+                for k in order
+                if all(l.get(k, {}).get("outcome") == PASS for l in by_run)
             ),
             differing,
             0,

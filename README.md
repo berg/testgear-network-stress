@@ -22,9 +22,15 @@ server, so the fault lands where the client actually meets it.
 
 ```bash
 python3 -m venv .venv && ./.venv/bin/pip install -e /path/to/pyvisa-py
-./.venv/bin/python checks/conformance.py                    # HiSLIP, mock server
+./run_all.sh                                    # everything, both transports
+./.venv/bin/python checks/conformance.py        # one script
 ./.venv/bin/python checks/conformance.py --protocol vxi11
 ```
+
+`run_all.sh` sweeps both transports by default, because most of what this suite
+has turned up is a difference between them. `REPORTS=dir ./run_all.sh` also
+writes a JSON report per script; `SOAK=300 ITER=2000 ./run_all.sh` leans on it
+harder.
 
 The Rust server builds itself on first use; you need a Rust toolchain
 ([rustup.rs](https://rustup.rs)) or a prebuilt binary in
@@ -38,15 +44,20 @@ Against real hardware, name a resource and the mock never starts:
 
 ## Pointing at a specific pyvisa-py tree
 
-`PYTHONPATH` wins over an editable install, so branches can be compared without
-reinstalling anything:
-
 ```bash
-PYTHONPATH=/path/to/some/pyvisa-py ./.venv/bin/python checks/conformance.py
+./run_all.sh --pyvisa-py ~/code/pyvisa-py
+./.venv/bin/python checks/conformance.py --pyvisa-py ~/code/pyvisa-py
 ```
 
-Every run prints the tree and commit it actually loaded. A result that cannot
-name what produced it is not reproducible, and comparing trees is the point.
+Every script honours `--pyvisa-py` (or `TESTGEAR_PYVISA_PY`) identically. It
+takes precedence over an editable install, applies to the subprocesses
+`run_all.sh` spawns, and **fails immediately** if the path is not a pyvisa-py
+checkout rather than falling through to whatever happens to be installed --
+silently testing the wrong tree is worse than not running.
+
+Every run prints the tree and the commit it actually loaded. A result that
+cannot name what produced it is not reproducible, and comparing trees is the
+point.
 
 ## Comparing backends
 
@@ -62,6 +73,18 @@ run can be pointed at another implementation:
 This is what turns a failure into a **disparity**, which is a much stronger
 claim: not "this behaviour is undesirable" but "this behaviour is inconsistent
 with a shipping implementation of the same spec".
+
+`compare.py` runs the same checks across several of them and prints the matrix,
+marking the rows where they disagree:
+
+```bash
+./.venv/bin/python compare.py --backends py,ni --protocol vxi11
+./.venv/bin/python compare.py --pyvisa-py-trees main=/a,branch=/b --html out.html
+```
+
+The second form compares two checkouts of pyvisa-py instead of two VISA
+libraries, which answers "did my branch change anything?" -- against upstream
+`main` this branch currently comes out ahead on six checks.
 
 | id | Implementation | Availability |
 | --- | --- | --- |
@@ -89,8 +112,19 @@ glance a skipped check reads like a passing one.
 | Path | What it is |
 | --- | --- |
 | `server/` | The Rust mock server. Vendored protocol code plus the virtual instrument, fault injector and control channel. |
-| `testgear/` | The Python harness: backend selection, the server fixture, PASS/FAIL/SKIP bookkeeping. |
-| `checks/` | The checks themselves. |
+| `testgear/` | The Python harness: backend selection, the server fixture, PASS/FAIL/SKIP bookkeeping, HTML rendering. |
+| `checks/` | The checks themselves: nine numbered scripts plus two conformance suites. |
+| `reproducers/` | One runnable script per open finding, and the original bench diagnostics under `bench/`. |
+| `docs/findings.md` | What this suite has found, and what looked like a finding and was not. |
+| `run_all.sh`, `compare.py` | The suite runner and the cross-backend matrix. |
+
+## Reports
+
+`--report PATH` writes JSON, `--html PATH` writes a self-contained page --
+both rendered from the same records, so they cannot disagree about what
+happened. Failures and skips come first and open; passes fold away. A report is
+read to find out what went wrong, and forty green lines above the one red one
+buries its own point.
 
 The mock server is driven over a line-JSON control socket, deliberately not
 carried in either instrument protocol — arming a fault over the stream under
