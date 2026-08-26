@@ -272,9 +272,17 @@ def provenance(resolved: Resolved) -> dict[str, str]:
             import pyvisa_py
 
             path = Path(pyvisa_py.__file__).parent
-            info["pyvisa-py"] = pyvisa_py.__version__
+            # __version__ comes from installed distribution metadata, which is
+            # stamped at install time and does not follow a tree put on
+            # sys.path afterwards. Reporting it unqualified next to a
+            # different checkout is how a run gets attributed to the wrong
+            # commit; the git describe below is the authoritative line.
             info["pyvisa-py path"] = str(path)
             info["pyvisa-py commit"] = _git_describe(path.parent)
+            info["pyvisa-py version"] = (
+                f"{pyvisa_py.__version__} (installed metadata, "
+                f"not necessarily this tree)"
+            )
         except ImportError:
             pass
     return info

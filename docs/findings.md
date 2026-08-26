@@ -46,6 +46,28 @@ Reproduce:
 # "a stalled connection times out rather than hanging"
 ```
 
+### VXI-11 accepts a trigger protocol it does not implement
+
+**Status:** open, minor. Present on `network-robustness` (`766d7de`) and
+upstream `main` (`1f53786`).
+
+`viAssertTrigger` with a protocol other than `VI_TRIG_PROT_DEFAULT` returns
+`VI_SUCCESS` on a VXI-11 session. VXI-11 `device_trigger` (B.6.9) carries no
+protocol selector at all, so nothing but the default can actually have been
+performed. The HiSLIP session gets this right and returns
+`VI_ERROR_NSUP_OPER`.
+
+Minor, but the shape is the bad one: the caller is told the thing it asked for
+happened, when what happened was something else. A silent substitution is
+worse than a refusal precisely because there is nothing to notice.
+
+Reproduce:
+
+```bash
+./.venv/bin/python checks/01_smoke.py --protocol vxi11
+# "a non-default trigger protocol is refused cleanly"
+```
+
 ---
 
 ## Server-side
@@ -102,6 +124,23 @@ lock. The same test with `viLock` held across each query passes in 0.03 s.
 
 The suite now asserts the locked case on both transports and the unlocked case
 only on HiSLIP, where the server's bus tenure actually provides the guarantee.
+
+### VXI-11 refusing unaddressed REN operations, and shared-lock keys
+
+Both looked like gaps in pyvisa-py's VXI-11 session and are neither.
+
+VXI-11 carries only *addressed* remote/local operations: `device_remote`
+(B.6.13) asserts REN and addresses the device, `device_local` (B.6.14) sends
+GTL. There is no RPC for driving the REN line on its own, so refusing
+`VI_GPIB_REN_ASSERT` and friends with `VI_ERROR_NSUP_OPER` is conforming.
+Requiring success from every `RENLineOperation` was the check being wrong.
+
+Likewise, VXI-11 locks are exclusive, per-link and non-nesting (RULE B.6.72).
+The protocol has no shared-lock concept and no field to carry a key, so a
+shared lock coming back with an empty key is not a backend that lost it.
+
+The suite now expects the addressed modes to succeed and the unaddressed ones
+to be refused, and treats the shared-lock key as a HiSLIP-only assertion.
 
 ### Three harness bugs that presented as client transport bugs
 
