@@ -219,6 +219,17 @@ pub struct VirtualInstrument {
     device_address: Option<u8>,
     srq_tx: broadcast::Sender<()>,
     srq_line: bool,
+    /// Milliseconds a read costs while the device is in local rather than
+    /// remote state.
+    ///
+    /// Real and worth modelling: a GPIB instrument in local services the bus
+    /// far more slowly than one in remote -- about 18x on an HP 34401A -- and
+    /// that difference is the only way a client can read the remote/local
+    /// state back without a human at the front panel. Without it the whole
+    /// remote/local matrix is untestable off a bench, which is how a server
+    /// treating every REN code as a no-op stayed healthy-looking for a long
+    /// time: the calls returned success and nothing happened.
+    local_penalty_ms: u64,
     faults: Arc<Faults>,
     observed: Arc<Observed>,
 }
@@ -240,6 +251,7 @@ impl VirtualInstrument {
             device_address: None,
             srq_tx,
             srq_line: false,
+            local_penalty_ms: 12,
             faults,
             observed,
         }
@@ -443,6 +455,11 @@ impl GpibBackend for VirtualInstrument {
             .map(|d| d.silence)
             .unwrap_or(Silence::Timeout);
         let (eos_char, eos_on) = self.eos;
+        let penalty = self.local_penalty_ms;
+        let in_local = !self.devices.get(&pad).map(|d| d.remote).unwrap_or(false);
+        if in_local && penalty > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(penalty)).await;
+        }
         let dev = self.device_mut(pad)?;
 
         if dev.output.is_empty() {
@@ -519,9 +536,21 @@ impl GpibBackend for VirtualInstrument {
     async fn ren(&mut self, enable: bool) -> Result<()> {
         self.observed.push(Event::Ren { enabled: enable });
         self.ren = enable;
-        if !enable {
-            for dev in self.devices.values_mut() {
-                dev.remote = false;
+        // Modelled as sticky: asserting REN puts the device in remote and
+        // dropping it returns the device to local, and neither is undone by
+        // the next thing that addresses it.
+        //
+        // On real hardware a device enters remote only once REN is asserted
+        // *and* it is addressed to listen (IEEE 488.1), so a GTL with REN
+        // still high bounces back to remote the moment anything addresses it.
+        // Modelling that faithfully makes the state unobservable from a
+        // client, because the query used to observe it is itself the
+        // addressing -- the suite documents exactly this for `address_gtl`.
+        // Reproducing the bounce here would only add noise to an oracle that
+        // has to distinguish the two states.
+        for dev in self.devices.values_mut() {
+            dev.remote = enable;
+            if !enable {
                 dev.lockout = false;
             }
         }
