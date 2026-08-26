@@ -96,6 +96,35 @@ Reproduce:
 # "a maxRecvSize of zero does not wedge the session"
 ```
 
+### VXI-11 interrupts are not acknowledged, throttling SRQs to one per second
+
+**Status:** open. Both trees.
+
+`device_intr_srq` (B.6.30) is an ONC RPC with a void reply -- void is not the
+same as absent, and the server is entitled to wait for it. pyvisa-py treats the
+interrupt as one-way and sends nothing back, so a server that waits pays a
+timeout per service request.
+
+Measured against ugpibd's server, which allows 1000 ms for the acknowledgement:
+
+| transport | SRQ delivery latency |
+| --- | --- |
+| HiSLIP | 0.00s, 0.00s, 0.00s, 0.00s, 0.00s |
+| VXI-11 | 0.00s, 1.00s, 1.00s, 1.00s, 1.00s |
+
+The first is free and every one after it costs exactly the server's timeout,
+which is the signature of a reply nobody sent rather than of load. The SRQs all
+arrive and none are lost, so nothing fails -- it is purely a throughput
+ceiling, and a hard one: one service request per second on a transport that
+otherwise sustains thousands of operations per second.
+
+It is worth calling this half server-side, because a server that treated the
+interrupt as one-way would never notice. But the acknowledgement is the
+client's to send, and any server that does wait for it is entitled to.
+
+Reproduce: `checks/03_srq.py --protocol vxi11` takes about 60s for 30 service
+requests and about 2s for the same 30 over HiSLIP.
+
 ### viFlush raises NotImplementedError out of a VXI-11 session
 
 **Status:** open. Both trees.

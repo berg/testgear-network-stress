@@ -173,8 +173,7 @@ def main() -> int:
                     "and lands here"
                 )
                 visa.check_errors(inst, stats, "at end of run")
-                if args.report:
-                    stats.write_report(args.report)
+                stats.write_outputs(args)
                 return stats.finish()
 
             # Anything above the geometric mean of the two is remote.
@@ -253,8 +252,7 @@ def main() -> int:
             stats.check(observed_state() == REMOTE, "the session ends in remote")
             visa.check_errors(inst, stats, "at end of run")
 
-        if args.report:
-            stats.write_report(args.report)
+        stats.write_outputs(args)
         return stats.finish()
 
 

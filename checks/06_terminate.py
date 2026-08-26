@@ -49,8 +49,7 @@ def main() -> int:
                 visa.NOT_IMPLEMENTED,
             ):
                 stats.skip(f"viTerminate is not implemented here ({st!r})")
-                if args.report:
-                    stats.write_report(args.report)
+                stats.write_outputs(args)
                 return stats.finish()
 
             # A long timeout so the read is genuinely blocked rather than
@@ -138,8 +137,7 @@ def main() -> int:
             )
             visa.check_errors(inst, stats, "at end of run")
 
-        if args.report:
-            stats.write_report(args.report)
+        stats.write_outputs(args)
         return stats.finish()
 
 

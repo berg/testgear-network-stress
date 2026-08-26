@@ -547,8 +547,7 @@ def main() -> int:
         harness.run_checks(
             checks, stats, watchdog=20.0, on_timeout=restart_server
         )
-        if args.report:
-            stats.write_report(args.report)
+        stats.write_outputs(args)
         return stats.finish()
 
 

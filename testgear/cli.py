@@ -73,6 +73,11 @@ def build_parser(description: str, protocol: str | None = None) -> argparse.Argu
         help="also write the results as JSON, for the comparison table",
     )
     parser.add_argument(
+        "--html",
+        metavar="PATH",
+        help="also write the results as a self-contained HTML page",
+    )
+    parser.add_argument(
         "--big-query",
         default=os.environ.get("TESTGEAR_BIG_QUERY"),
         help="a query returning a large response, for the multi-chunk read "

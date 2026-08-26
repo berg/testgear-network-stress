@@ -224,8 +224,7 @@ def main() -> int:
                 except Exception:  # noqa: BLE001
                     break
 
-        if args.report:
-            stats.write_report(args.report)
+        stats.write_outputs(args)
         return stats.finish()
 
 

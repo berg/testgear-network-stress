@@ -248,8 +248,7 @@ def main() -> int:
             )
             visa.check_errors(inst, stats, "at end of run")
 
-        if args.report:
-            stats.write_report(args.report)
+        stats.write_outputs(args)
         return stats.finish()
 
 

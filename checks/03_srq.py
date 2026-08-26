@@ -69,6 +69,18 @@ def main() -> int:
                     f"{received}/{args.iterations} queued SRQs arrived",
                     rule="VPP-4.3 3.4.1",
                 )
+                if args.protocol == "vxi11":
+                    # Not a failure, but the reason this section is slow, and
+                    # worth saying out loud so nobody spends an afternoon on
+                    # it twice: pyvisa-py does not acknowledge device_intr_srq
+                    # (B.6.30, a void reply is still a reply), so a server that
+                    # waits for it pays its timeout on every service request
+                    # after the first. See docs/findings.md.
+                    stats.note(
+                        "VXI-11 service requests are delivered about one per "
+                        "second here because the interrupt RPC goes "
+                        "unacknowledged; HiSLIP delivers them immediately"
+                    )
                 inst.disable_event(visa.SRQ, visa.QUEUE)
                 inst.discard_events(visa.SRQ, visa.QUEUE)
 
@@ -159,13 +171,22 @@ def main() -> int:
                     f"({bad_stb[:3]})",
                     rule="VPP-4.3 3.3.1",
                 )
+                # Bounded by wall clock as well as by count. The race can
+                # queue thousands of events, and draining them one at a time
+                # dominated the whole suite's runtime -- 233s for this script
+                # against the mock, almost all of it here. The exact number is
+                # not the point of the check; that any arrived is.
                 drained = 0
-                while drained < 10000:
+                drain_until = time.time() + 5.0
+                while drained < 10000 and time.time() < drain_until:
                     response = inst.wait_on_event(visa.SRQ, 0, capture_timeout=True)
                     if response.timed_out:
                         break
                     drained += 1
-                stats.note(f"{drained} service requests queued during the race")
+                capped = " (drain capped)" if time.time() >= drain_until else ""
+                stats.note(
+                    f"{drained} service requests queued during the race{capped}"
+                )
                 stats.check(
                     drained > 0, "the race actually produced service requests"
                 )
@@ -187,8 +208,7 @@ def main() -> int:
                     except Exception:  # noqa: BLE001
                         break
 
-        if args.report:
-            stats.write_report(args.report)
+        stats.write_outputs(args)
         return stats.finish()
 
 

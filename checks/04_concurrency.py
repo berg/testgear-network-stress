@@ -249,8 +249,7 @@ def main() -> int:
             f"{visa.open_fd_count()} fds"
         )
 
-        if args.report:
-            stats.write_report(args.report)
+        stats.write_outputs(args)
         return stats.finish()
 
 

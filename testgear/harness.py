@@ -139,6 +139,18 @@ class Stats:
         with open(path, "w") as handle:
             json.dump(self.report(), handle, indent=2)
 
+    def write_html(self, path: str) -> None:
+        from . import report as report_module
+
+        report_module.write_run(self.report(), path)
+
+    def write_outputs(self, args) -> None:
+        """Honour --report and --html, whichever were asked for."""
+        if getattr(args, "report", None):
+            self.write_report(args.report)
+        if getattr(args, "html", None):
+            self.write_html(args.html)
+
     def finish(self) -> int:
         elapsed = time.time() - self.started
         skipped = f", {len(self.skipped)} SKIPPED" if self.skipped else ""
