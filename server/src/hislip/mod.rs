@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 ugpibd contributors
+//
+// HiSLIP (IVI-6.1, High-Speed LAN Instrument Protocol) server.
+//
+// The message codec (messages.rs, errors.rs, protocol.rs) is vendored and
+// adapted from lxi-rs (https://github.com/Atmelfan/lxi-rs), which is
+// GPL-3.0-or-later. Original author: Gustav Palmqvist.
+
+pub mod client;
+pub mod errors;
+pub mod instrument;
+pub mod messages;
+pub mod protocol;
+pub mod server;
+
+// The lock registry moved to `frontend` so every front-end can share one
+// table; re-exported here because HiSLIP is where VISA's lock semantics were
+// first mapped and existing callers know it by this path.
+pub use crate::frontend::lock;
+
+/// IANA-assigned HiSLIP port.
+pub const STANDARD_PORT: u16 = 4880;
+/// Sub-address used if the client does not specify one.
+pub const DEFAULT_SUBADDRESS: &str = "hislip0";

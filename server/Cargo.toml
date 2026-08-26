@@ -1,0 +1,35 @@
+[package]
+name = "testgear-mock-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+# GPL-3.0-or-later, and not by choice of style: src/hislip/, src/vxi11/,
+# src/frontend/ and src/backend.rs are vendored from ugpibd, which is
+# GPL-3.0-or-later. Anything derived from them inherits it.
+license = "GPL-3.0-or-later"
+description = "HiSLIP and VXI-11 servers backed by a virtual instrument, with fault injection, for testing VISA clients"
+
+[[bin]]
+name = "testgear-mock-server"
+path = "src/main.rs"
+
+[lib]
+name = "testgear_mock_server"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "macros", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+bytes = "1"
+byteorder = "1.4"
+bitfield = "0.14"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "test-util"] }
