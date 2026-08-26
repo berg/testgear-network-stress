@@ -33,3 +33,4 @@ pub mod observe;
 pub mod proxy;
 pub mod virtual_instrument;
 pub mod vxi11;
+pub mod vxi11_fault;

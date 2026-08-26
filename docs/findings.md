@@ -68,6 +68,34 @@ Reproduce:
 # "a non-default trigger protocol is refused cleanly"
 ```
 
+### A maxRecvSize of zero wedges a VXI-11 session indefinitely
+
+**Status:** open. Both trees. The most serious thing in this list.
+
+`create_link` reports the largest write the server will accept (B.6.3, which
+requires at least 1024). If a server answers zero, pyvisa-py hangs: the write
+path divides the message into `maxRecvSize` chunks and never terminates. It is
+not slow, it does not time out, and the session timeout does not apply --
+`viWrite` simply never returns. The suite's watchdog reports it after 20s;
+without one it hangs the run.
+
+A server reporting zero is out of spec, so this needs a hostile or broken
+server to reach. That is still worth fixing: zero is exactly what a
+half-initialised field or a byte-order slip produces, the client is the side
+that can defend itself, and an unkillable loop inside a library call is much
+worse than an error. A bounds check on the value from `create_link` -- reject
+it, or fall back to the 1024 floor the rule guarantees -- is the whole fix.
+
+The abandoned thread keeps running afterwards and keeps driving the server,
+which is its own hazard for anything sharing that server.
+
+Reproduce:
+
+```bash
+./.venv/bin/python checks/vxi11_conformance.py
+# "a maxRecvSize of zero does not wedge the session"
+```
+
 ### viFlush raises NotImplementedError out of a VXI-11 session
 
 **Status:** open. Both trees.

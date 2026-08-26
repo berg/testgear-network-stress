@@ -39,6 +39,29 @@ def open_inst(**kwargs):
     )
 
 
+def restart_server() -> None:
+    """Replace the mock after a check has been abandoned mid-flight.
+
+    A watchdog trip leaves a thread blocked inside the client, and a wedged
+    client usually loops rather than sitting still -- so it keeps driving the
+    server, and its traffic shows up in the observation log the next check
+    reads. There is no safe way to kill the thread, so the target is replaced
+    instead and the old one left to whatever is still holding it.
+    """
+    from testgear.server import MockServer
+
+    old = CTX.get("server")
+    if old is None:
+        return
+    fresh = MockServer(proxy=old._proxy).start()
+    CTX["server"] = fresh
+    CTX["resource"] = fresh.resource(CTX["protocol"])
+    try:
+        old.stop()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def server():
     """The mock server, or skip: this check injects a fault."""
     if CTX.get("server") is None:
@@ -430,7 +453,11 @@ def main() -> int:
 
     with cli.open_target(args) as (backend, resource, srv):
         CTX.update(
-            backend=backend, resource=resource, server=srv, timeout=args.timeout
+            backend=backend,
+            resource=resource,
+            server=srv,
+            timeout=args.timeout,
+            protocol=args.protocol,
         )
         stats = harness.Stats(
             f"conformance ({args.protocol})",
@@ -438,7 +465,9 @@ def main() -> int:
             context=cli.context(args, backend, resource),
         )
         checks = harness.collect(sys.modules[__name__], protocol=args.protocol)
-        harness.run_checks(checks, stats, watchdog=30.0)
+        harness.run_checks(
+            checks, stats, watchdog=30.0, on_timeout=restart_server
+        )
         if args.report:
             stats.write_report(args.report)
         return stats.finish()

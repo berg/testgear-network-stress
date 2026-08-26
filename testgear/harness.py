@@ -196,6 +196,7 @@ def run_checks(
     stats: Stats,
     *args,
     watchdog: float | None = 30.0,
+    on_timeout: Callable[[], None] | None = None,
     **kwargs,
 ) -> Stats:
     """Run registered check functions, one Result each.
@@ -238,6 +239,19 @@ def run_checks(
                 stats.failures.append(f"{name}: {cited}")
                 stats.results.append(Result(name, FAIL, cited, elapsed, rule))
             print(f"FAIL  {name}\n      {cited}")
+            # The abandoned thread is still running, and it is still talking to
+            # the target -- a wedged client typically loops. Left alone it goes
+            # on generating traffic, which lands in the observation log that
+            # later checks assert against: one hung check reported a 413-byte
+            # write arriving in 3473 pieces, all but seven of them someone
+            # else's. Replacing the target is the only way to get a clean one,
+            # since the thread cannot be killed.
+            if on_timeout is not None:
+                print(f"      replacing the target: {name} left a thread running")
+                try:
+                    on_timeout()
+                except Exception as restart_exc:  # noqa: BLE001
+                    stats.note(f"could not replace the target: {restart_exc}")
         except Exception:
             elapsed = time.time() - started
             trace = traceback.format_exc()

@@ -28,22 +28,38 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::debug;
 
 use crate::faults::Faults;
+use crate::vxi11_fault::Tracker;
 
 /// Accept on `listener` and proxy every connection to `upstream`.
-pub async fn run(listener: TcpListener, upstream: String, faults: Arc<Faults>) -> Result<()> {
+///
+/// `tracker` is present only for the VXI-11 side, where faults are expressed
+/// in terms of RPC records rather than bytes. HiSLIP passes None and the
+/// bytes are never parsed.
+pub async fn run(
+    listener: TcpListener,
+    upstream: String,
+    faults: Arc<Faults>,
+    tracker: Option<Arc<Tracker>>,
+) -> Result<()> {
     loop {
         let (client, peer) = listener.accept().await?;
         let upstream = upstream.clone();
         let faults = faults.clone();
+        let tracker = tracker.clone();
         tokio::spawn(async move {
-            if let Err(err) = pump(client, &upstream, faults).await {
+            if let Err(err) = pump(client, &upstream, faults, tracker).await {
                 debug!(%peer, %err, "proxied connection ended");
             }
         });
     }
 }
 
-async fn pump(client: TcpStream, upstream: &str, faults: Arc<Faults>) -> Result<()> {
+async fn pump(
+    client: TcpStream,
+    upstream: &str,
+    faults: Arc<Faults>,
+    tracker: Option<Arc<Tracker>>,
+) -> Result<()> {
     let server = TcpStream::connect(upstream).await?;
     // Nagle would coalesce the segments the dribble knob exists to split, and
     // would blur the timing the latency knob exists to control.
@@ -56,12 +72,20 @@ async fn pump(client: TcpStream, upstream: &str, faults: Arc<Faults>) -> Result<
     // Client -> server is forwarded verbatim. The faults model what the
     // *instrument side* does to the stream; corrupting what the client sent
     // would test the server, which is not what this suite is for.
+    let call_tracker = tracker.clone();
     let to_server = async move {
         let mut buf = vec![0u8; 65536];
         loop {
             let n = client_rx.read(&mut buf).await?;
             if n == 0 {
                 break;
+            }
+            // Note what was asked, so a reply can be matched to a procedure.
+            // The request itself is never altered: the faults model what the
+            // instrument side does, and corrupting what the client sent would
+            // be testing the server.
+            if let Some(t) = &call_tracker {
+                t.observe_calls(&buf[..n]);
             }
             server_tx.write_all(&buf[..n]).await?;
         }
@@ -113,7 +137,11 @@ async fn pump(client: TcpStream, upstream: &str, faults: Arc<Faults>) -> Result<
             }
 
             forwarded += chunk.len() as u64;
-            write_chunk(&mut client_tx, chunk, &faults).await?;
+            let rewritten = tracker.as_ref().and_then(|t| t.rewrite_replies(chunk));
+            match &rewritten {
+                Some(body) => write_chunk(&mut client_tx, body, &faults).await?,
+                None => write_chunk(&mut client_tx, chunk, &faults).await?,
+            }
         }
         let _ = client_tx.shutdown().await;
         Ok::<_, anyhow::Error>(())

@@ -27,6 +27,7 @@ use tracing::debug;
 use crate::faults::{FaultConfig, Faults};
 use crate::observe::{Event, Observed};
 use crate::virtual_instrument::{Device, VirtualInstrument};
+use crate::vxi11_fault::{Tracker, Vxi11Faults};
 
 /// What the harness can ask for.
 #[derive(Debug, Deserialize)]
@@ -53,6 +54,8 @@ pub enum Request {
     BigReply { pad: u8, bytes: usize },
     /// Push a status-byte bit set, so a check can raise SRQ on demand.
     SetStb { pad: u8, bits: u8 },
+    /// Arm the RPC-level VXI-11 faults.
+    Vxi11Faults { config: Vxi11Faults },
     /// Ping, so the harness can wait for the server to come up.
     Ping,
 }
@@ -82,6 +85,7 @@ pub struct Control {
     pub faults: Arc<Faults>,
     pub observed: Arc<Observed>,
     pub instrument: Arc<Mutex<VirtualInstrument>>,
+    pub vxi11: Arc<Tracker>,
 }
 
 pub async fn run(listener: TcpListener, ctl: Arc<Control>) -> Result<()> {
@@ -130,7 +134,12 @@ async fn handle(request: Request, ctl: &Control) -> Response {
         }
         Request::Reset => {
             ctl.faults.reset();
+            ctl.vxi11.clear();
             ctl.observed.clear();
+            Response::Ok { ok: true }
+        }
+        Request::Vxi11Faults { config } => {
+            ctl.vxi11.set(config);
             Response::Ok { ok: true }
         }
         Request::Observed => Response::Events {

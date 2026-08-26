@@ -196,6 +196,26 @@ class MockServer:
     def set_stb(self, bits: int, pad: int = 0) -> None:
         self._command(cmd="set_stb", pad=pad, bits=bits)
 
+    def set_vxi11_faults(self, **config) -> None:
+        """Arm the RPC-level VXI-11 faults (error codes, maxRecvSize, ...)."""
+        self._command(cmd="vxi11_faults", config=config)
+
+    @contextlib.contextmanager
+    def vxi11_faults(self, **config):
+        """Arm RPC-level faults for a block, then disarm them.
+
+        Cleared by sending an empty config rather than by restoring a
+        snapshot: these are one-shot by nature -- "answer the next
+        device_read with error 4" -- so there is no prior value that means
+        anything once the block is over.
+        """
+        self.set_vxi11_faults(**config)
+        try:
+            yield self
+        finally:
+            with contextlib.suppress(Exception):
+                self.set_vxi11_faults()
+
     @contextlib.contextmanager
     def faults(self, **config):
         """Arm faults for the duration of a block, then put them back.

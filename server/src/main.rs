@@ -26,6 +26,7 @@ use testgear_mock_server::frontend::lock::LockRegistry;
 use testgear_mock_server::observe::Observed;
 use testgear_mock_server::proxy;
 use testgear_mock_server::virtual_instrument::VirtualInstrument;
+use testgear_mock_server::vxi11_fault::Tracker;
 use testgear_mock_server::{hislip, vxi11};
 
 #[derive(Parser, Debug)]
@@ -110,11 +111,13 @@ async fn main() -> Result<()> {
     use std::io::Write;
     std::io::stdout().flush()?;
 
+    let vxi11_tracker = Arc::new(Tracker::new());
     let control = Arc::new(Control {
         ports,
         faults: faults.clone(),
         observed: observed.clone(),
         instrument: instrument.clone(),
+        vxi11: vxi11_tracker.clone(),
     });
 
     let backend: Arc<Mutex<dyn GpibBackend>> = instrument.clone();
@@ -153,8 +156,8 @@ async fn main() -> Result<()> {
             .map_err(anyhow::Error::from)
     };
 
-    let vxi11_proxy_fut = optional_proxy(vxi11_proxy, faults.clone());
-    let hislip_proxy_fut = optional_proxy(hislip_proxy, faults.clone());
+    let vxi11_proxy_fut = optional_proxy(vxi11_proxy, faults.clone(), Some(vxi11_tracker));
+    let hislip_proxy_fut = optional_proxy(hislip_proxy, faults.clone(), None);
     let control_fut = control::run(control_listener, control);
 
     // Any one of these ending means the server is no longer serving what it
@@ -198,9 +201,10 @@ async fn bind_pair(
 async fn optional_proxy(
     listener: Option<(TcpListener, String)>,
     faults: Arc<Faults>,
+    tracker: Option<Arc<Tracker>>,
 ) -> Result<()> {
     match listener {
-        Some((listener, upstream)) => proxy::run(listener, upstream, faults).await,
+        Some((listener, upstream)) => proxy::run(listener, upstream, faults, tracker).await,
         None => std::future::pending::<Result<()>>().await,
     }
 }
