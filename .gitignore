@@ -9,3 +9,4 @@ server/target/
 # vendor/README.md is the only tracked file in it.
 vendor/*
 !vendor/README.md
+reports/

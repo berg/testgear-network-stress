@@ -86,6 +86,34 @@ The second form compares two checkouts of pyvisa-py instead of two VISA
 libraries, which answers "did my branch change anything?" -- against upstream
 `main` this branch currently comes out ahead on six checks.
 
+### Running the vendor implementations in containers
+
+NI and R&S ship x86-64 Linux binaries only, so they run on a Linux host rather
+than on a development Mac -- emulating x86 to measure an implementation whose
+*timing* is part of what is being measured would be measuring qemu.
+
+Drop the installers in `vendor/` (see [`vendor/README.md`](vendor/README.md))
+and:
+
+```bash
+./remote-compare.sh --check     # what is installed, and does it load?
+./remote-compare.sh             # build, run, and print the matrix
+```
+
+It syncs the suite and the pyvisa-py tree under test to `$TESTGEAR_HOST`
+(default `slopbox`), builds one container image per implementation, runs the
+checks inside each, collects the JSON reports and renders the matrix.
+
+pyvisa-py's own column is produced **in the same container** rather than on the
+local machine. Running it here would compare a Linux VISA against a macOS one
+and quietly attribute the platform difference to the implementation.
+
+The container check is a diagnosis step in its own right: a vendor library that
+installs but will not initialise -- NI-VISA wanting kernel modules a container
+cannot provide is the likely case -- reports exit 11 with that stated, rather
+than surfacing later as "backend not available", which is indistinguishable
+from having forgotten to install it.
+
 | id | Implementation | Availability |
 | --- | --- | --- |
 | `py` | PyVISA-py | pip |
