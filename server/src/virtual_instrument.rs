@@ -255,7 +255,7 @@ impl VirtualInstrument {
     }
 
     /// Recompute SRQ and fire the broadcast on a rising MSS edge.
-    fn update_srq(&mut self, pad: u8) {
+    pub fn update_srq(&mut self, pad: u8) {
         let mss = self
             .devices
             .get(&pad)
@@ -418,16 +418,18 @@ impl GpibBackend for VirtualInstrument {
         if dev.output.is_empty() {
             self.observed.push(Event::ReadTimeout { pad });
             return match silence {
-                // A real addressed-to-talk read with nothing to send just
-                // never completes; the controller's timeout ends it. The
-                // servers above translate that into their protocol's timeout.
-                Silence::Timeout => {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        self.timeout_ms as u64,
-                    ))
-                    .await;
-                    Ok((Vec::new(), false))
-                }
+                // No data and no END is how a real adapter reports a bus
+                // timeout, and it is what the servers above are written
+                // against: they enforce the client's io_timeout themselves,
+                // in short slices, because an adapter's own timeout table
+                // never sees the client's number.
+                //
+                // Sleeping here instead would be worse than merely
+                // redundant. The bus mutex is held across this call, so a
+                // sleep blocks *every other session* for its duration --
+                // which presents as unrelated checks timing out, and reads
+                // exactly like a client-side concurrency bug.
+                Silence::Timeout => Ok((Vec::new(), false)),
                 Silence::EmptyMessage => Ok((Vec::new(), true)),
             };
         }

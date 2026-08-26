@@ -1,0 +1,272 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Which VISA implementation is under test, and where it came from.
+
+Every check in this suite is written against the VISA API, not against
+pyvisa-py, so the same check can be pointed at any implementation. That is the
+point: a check that fails on one backend and passes on another has found a
+*disparity*, and a disparity is a stronger claim than a failure. It says the
+behaviour is not merely undesirable but inconsistent with a shipping
+implementation of the same spec, which is the argument that actually moves an
+upstream discussion.
+
+Backends are named by short id (`py`, `ni`, `rs`, `keysight`, `tek`, `sim`) or
+by an explicit path to a VISA shared library. Only `py` and `sim` install with
+pip; the rest are vendor packages a human installs from a GUI, so this module's
+main job is to find them if they are there and to say plainly what is missing
+if they are not. A backend that cannot be loaded is *skipped and reported*,
+never silently dropped -- a comparison table with a column quietly absent reads
+like agreement between the backends that remain.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import os
+import platform
+import subprocess
+import sys
+from pathlib import Path
+
+import pyvisa
+
+
+@dataclasses.dataclass(frozen=True)
+class BackendSpec:
+    """One VISA implementation this suite knows how to look for."""
+
+    id: str
+    name: str
+    #: What pyvisa is handed: "@py", "@sim", or a path to a shared library.
+    locator: str | None
+    #: Candidate library paths per platform, first match wins.
+    candidates: tuple[str, ...] = ()
+    #: Where a human gets it, printed when it is missing.
+    source: str = ""
+    #: True for implementations that speak the real network protocols. A
+    #: simulated backend answers the API without a socket, so it can only ever
+    #: agree about API shape, never about wire behaviour.
+    networked: bool = True
+
+
+_SYSTEM = platform.system()
+
+
+def _paths(darwin: tuple[str, ...] = (), linux: tuple[str, ...] = (),
+           windows: tuple[str, ...] = ()) -> tuple[str, ...]:
+    return {"Darwin": darwin, "Linux": linux, "Windows": windows}.get(_SYSTEM, ())
+
+
+#: Every backend this suite knows about, in the order a report lists them.
+BACKENDS: dict[str, BackendSpec] = {
+    "py": BackendSpec(
+        id="py",
+        name="PyVISA-py",
+        locator="@py",
+        source="pip install pyvisa-py",
+    ),
+    "ni": BackendSpec(
+        id="ni",
+        name="NI-VISA",
+        locator=None,
+        candidates=_paths(
+            darwin=("/Library/Frameworks/VISA.framework/VISA",),
+            linux=(
+                "/usr/lib/x86_64-linux-gnu/libvisa.so",
+                "/usr/local/vxipnp/linux/lib64/libvisa.so",
+                "/usr/lib/libvisa.so",
+            ),
+            windows=(r"C:\Windows\System32\visa64.dll", r"C:\Windows\System32\nivisa64.dll"),
+        ),
+        source="https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html",
+    ),
+    "rs": BackendSpec(
+        id="rs",
+        name="R&S VISA",
+        locator=None,
+        candidates=_paths(
+            darwin=("/Library/Frameworks/RsVisa.framework/RsVisa",),
+            linux=("/usr/lib/librsvisa.so", "/usr/local/lib/librsvisa.so"),
+            windows=(r"C:\Windows\System32\RsVisa32.dll",),
+        ),
+        source="https://www.rohde-schwarz.com/applications/r-s-visa-application-note_56280-148812.html",
+    ),
+    "keysight": BackendSpec(
+        id="keysight",
+        name="Keysight IO Libraries",
+        locator=None,
+        candidates=_paths(
+            # No macOS build exists; the tuple is empty there on purpose, so
+            # the skip message names the platform rather than a missing file.
+            linux=("/opt/keysight/iolibs/libktvisa32.so", "/usr/lib/libktvisa32.so"),
+            windows=(r"C:\Windows\System32\ktvisa32.dll",),
+        ),
+        source="https://www.keysight.com/find/iosuite (Windows and Linux only)",
+    ),
+    "tek": BackendSpec(
+        id="tek",
+        name="TekVISA",
+        locator=None,
+        candidates=_paths(
+            windows=(r"C:\Windows\System32\visa32.dll",),
+        ),
+        source="https://www.tek.com/en/support/software/driver/tekvisa-connectivity-software-v411 (Windows only)",
+    ),
+    "sim": BackendSpec(
+        id="sim",
+        name="PyVISA-sim",
+        locator="@sim",
+        source="pip install pyvisa-sim",
+        networked=False,
+    ),
+}
+
+
+@dataclasses.dataclass
+class Resolved:
+    """A backend that was asked for, and what became of the request."""
+
+    spec: BackendSpec
+    locator: str | None
+    available: bool
+    reason: str = ""
+
+    @property
+    def id(self) -> str:
+        return self.spec.id
+
+    @property
+    def name(self) -> str:
+        return self.spec.name
+
+    def resource_manager(self) -> pyvisa.ResourceManager:
+        """The one ResourceManager for this backend.
+
+        ``pyvisa.ResourceManager`` is a singleton *per backend*, so every
+        caller with the same locator gets the same object. That matters for
+        threads: ``ResourceManager.close()`` closes every session it owns, so
+        a worker closing "its" manager tears down its siblings' sessions. This
+        suite never closes a manager; sessions are closed individually.
+        """
+        if not self.available:
+            raise RuntimeError(f"{self.name} is not available here: {self.reason}")
+        return pyvisa.ResourceManager(self.locator)
+
+
+def resolve(spec_id: str) -> Resolved:
+    """Find `spec_id`, reporting rather than raising when it is missing."""
+    # An explicit path wins over any name, so an install in an unusual place
+    # never needs this file edited.
+    if "/" in spec_id or "\\" in spec_id or spec_id.endswith((".so", ".dll")):
+        path = Path(spec_id)
+        spec = BackendSpec(id=path.name, name=f"VISA at {spec_id}", locator=spec_id)
+        if not path.exists():
+            return Resolved(spec, None, False, f"no such file: {spec_id}")
+        return Resolved(spec, spec_id, True)
+
+    spec = BACKENDS.get(spec_id)
+    if spec is None:
+        known = ", ".join(BACKENDS)
+        raise KeyError(f"unknown backend {spec_id!r}; known ids are {known}")
+
+    if spec.locator is not None:
+        # "@py" and "@sim" are python packages: importable or not.
+        module = {"@py": "pyvisa_py", "@sim": "pyvisa_sim"}[spec.locator]
+        try:
+            __import__(module)
+        except ImportError as exc:
+            return Resolved(spec, None, False, f"{module} is not importable ({exc})")
+        return Resolved(spec, spec.locator, True)
+
+    if not spec.candidates:
+        return Resolved(
+            spec, None, False, f"no {spec.name} build exists for {_SYSTEM}"
+        )
+
+    for candidate in spec.candidates:
+        if Path(candidate).exists():
+            return Resolved(spec, candidate, True)
+
+    looked = ", ".join(spec.candidates)
+    return Resolved(spec, None, False, f"not installed (looked in {looked})")
+
+
+def resolve_all(spec_ids: list[str]) -> list[Resolved]:
+    return [resolve(s) for s in spec_ids]
+
+
+def available_ids() -> list[str]:
+    """Backend ids that can actually be loaded on this machine."""
+    return [i for i in BACKENDS if resolve(i).available]
+
+
+def provenance(resolved: Resolved) -> dict[str, str]:
+    """Where the implementation under test came from.
+
+    A result is only reproducible if the thing that produced it can be named.
+    For pyvisa-py that means the checkout and the commit, not just a version:
+    the whole reason this suite exists is comparing branches of it, and two
+    branches report the same ``__version__`` right up until one of them is
+    released.
+    """
+    info: dict[str, str] = {
+        "backend": resolved.name,
+        "locator": resolved.locator or "(unavailable)",
+        "pyvisa": pyvisa.__version__,
+        "python": sys.version.split()[0],
+        "platform": f"{_SYSTEM} {platform.release()}",
+    }
+
+    if resolved.locator == "@py":
+        try:
+            import pyvisa_py
+
+            path = Path(pyvisa_py.__file__).parent
+            info["pyvisa-py"] = pyvisa_py.__version__
+            info["pyvisa-py path"] = str(path)
+            info["pyvisa-py commit"] = _git_describe(path.parent)
+        except ImportError:
+            pass
+    return info
+
+
+def _git_describe(tree: Path) -> str:
+    """`git describe` for a checkout, or a note saying why not."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(tree), "describe", "--always", "--dirty", "--tags"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"(git failed: {exc})"
+    if out.returncode != 0:
+        return "(not a git checkout)"
+
+    described = out.stdout.strip()
+    branch = subprocess.run(
+        ["git", "-C", str(tree), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    ).stdout.strip()
+    return f"{described} on {branch}" if branch else described
+
+
+def describe_environment(resolved: Resolved) -> str:
+    lines = [f"{k}: {v}" for k, v in provenance(resolved).items()]
+    return "\n".join(f"  {line}" for line in lines)
+
+
+def pyvisa_py_tree_note() -> str | None:
+    """Warn when PYTHONPATH shadows the installed pyvisa-py.
+
+    `run_all.sh` puts a checkout on PYTHONPATH so branches can be compared
+    without reinstalling, which is convenient and completely invisible in the
+    output unless something says so. A result attributed to the wrong tree is
+    worse than no result.
+    """
+    path = os.environ.get("PYTHONPATH")
+    if not path:
+        return None
+    return f"PYTHONPATH is set, which takes precedence over any install: {path}"

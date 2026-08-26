@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{bail, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// A `None`-able u32 in an atomic: `u64::MAX` is the sentinel for unset.
 const UNSET: u64 = u64::MAX;
@@ -68,11 +68,33 @@ pub struct FaultConfig {
     pub read_delay_ms: Option<u32>,
     pub write_delay_ms: Option<u32>,
     pub fail_next_write: Option<bool>,
+    #[serde(default, deserialize_with = "explicit_null")]
     pub forced_stb: Option<Option<u8>>,
+    #[serde(default, deserialize_with = "explicit_null")]
     pub drop_after_bytes: Option<Option<u64>>,
+    #[serde(default, deserialize_with = "explicit_null")]
     pub stall_after_bytes: Option<Option<u64>>,
     pub dribble: Option<bool>,
     pub latency_ms: Option<u32>,
+}
+
+/// Tell an absent field from an explicit `null`.
+///
+/// The nullable knobs carry three states -- leave alone, set, clear -- as
+/// `Option<Option<T>>`. serde's derive collapses two of them: a missing field
+/// and a `null` both deserialize to `None`, so "clear this fault" arrives
+/// indistinguishable from "do not touch this fault" and the fault stays
+/// armed. Every check after it then fails against a server that is still
+/// dropping connections, which is investigated as a client bug.
+///
+/// With `default` supplying `None` for an absent field, this runs only when
+/// the key is present, so it can map `null` to `Some(None)`.
+fn explicit_null<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 impl Faults {

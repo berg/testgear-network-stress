@@ -149,7 +149,22 @@ async fn handle(request: Request, ctl: &Control) -> Response {
             with_device(ctl, pad, |dev| dev.set_big_reply_len(bytes)).await
         }
         Request::SetStb { pad, bits } => {
-            with_device(ctl, pad, |dev| dev.set_user_stb(bits)).await
+            // Raising the bits is not enough on its own. HiSLIP does not
+            // serial-poll on every status query -- it synthesises the status
+            // byte server-side and relies on the SRQ forwarder for the rest
+            // -- so a status set without the resulting service request is a
+            // status no HiSLIP client will ever observe.
+            let mut guard = ctl.instrument.lock().await;
+            match guard.device_mut(pad) {
+                Ok(dev) => {
+                    dev.set_user_stb(bits);
+                    guard.update_srq(pad);
+                    Response::Ok { ok: true }
+                }
+                Err(err) => Response::Error {
+                    error: err.to_string(),
+                },
+            }
         }
     }
 }
