@@ -232,7 +232,13 @@ def check_shared_key_stable():
             raise Skip(f"this implementation refuses shared locks here ({st!r})")
         assert st == StatusCode.success, f"the first shared lock returned {st!r}"
         second, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "nest-key")
-        assert st == StatusCode.success, f"the second shared lock returned {st!r}"
+        # VI_SUCCESS_NESTED_SHARED is the *correct* answer here (3.6.29), not a
+        # failure. Demanding plain VI_SUCCESS failed NI-VISA for implementing
+        # the rule properly -- the same mistake this file made once already
+        # with the exclusive case.
+        assert st in (StatusCode.success, StatusCode.success_nested_shared), (
+            f"the second shared lock returned {st!r}"
+        )
         visa.status(lib.unlock, sess)
         visa.status(lib.unlock, sess)
         assert as_text(first) == as_text(second), (

@@ -36,9 +36,19 @@ ALL_INSTR = (
     ("VI_ATTR_INTF_INST_NAME", RA.interface_instrument_name),
     ("VI_ATTR_TMO_VALUE", RA.timeout_value),
     ("VI_ATTR_INTF_NUM", RA.interface_number),
-    ("VI_ATTR_TRIG_ID", RA.trigger_id),
     ("VI_ATTR_DMA_ALLOW_EN", RA.dma_allow_enabled),
 )
+
+#: 5.1.11 lists VI_ATTR_TRIG_ID among the attributes every INSTR resource
+#: SHALL support, and **no** implementation supports it on TCPIP -- pyvisa-py,
+#: NI-VISA and R&S VISA all answer VI_ERROR_NSUP_ATTR.
+#:
+#: Three independent implementations agreeing is not three bugs. The attribute
+#: selects a hardware trigger line, which a TCPIP session does not have, so the
+#: rule reads as drafted for the backplane interfaces and applied to INSTR
+#: generally. Reported rather than failed: a check nobody can pass tells you
+#: about the spec, not the implementations.
+UNIVERSALLY_ABSENT = (("VI_ATTR_TRIG_ID", RA.trigger_id),)
 
 #: RULE 5.1.12 -- message-based interfaces, TCPIP among them.
 MESSAGE_BASED = (
@@ -89,7 +99,30 @@ def missing(inst, required) -> list[str]:
     return absent
 
 
-@check("every attribute RULE 5.1.11 requires of an INSTR session",
+@check("VI_ATTR_TRIG_ID is absent everywhere, as 5.1.11 does not anticipate",
+       rule="VPP-4.3 5.1.11")
+def check_trig_id_universally_absent():
+    """A rule no implementation satisfies, recorded rather than prosecuted.
+
+    5.1.11 requires VI_ATTR_TRIG_ID of every INSTR resource. pyvisa-py,
+    NI-VISA and R&S VISA all answer VI_ERROR_NSUP_ATTR on a TCPIP session. The
+    attribute selects a hardware trigger line, which TCPIP does not have.
+
+    Three independent implementations agreeing is evidence about the clause,
+    not about the implementations, so this passes when the attribute is absent
+    and would want investigating if it ever appeared.
+    """
+    with open_inst() as inst:
+        absent = missing(inst, UNIVERSALLY_ABSENT)
+        if not absent:
+            return (
+                "VI_ATTR_TRIG_ID is supported here, which no implementation "
+                "did when this was written -- worth a look"
+            )
+        return "absent, as in every implementation measured"
+
+
+@check("every other attribute RULE 5.1.11 requires of an INSTR session",
        rule="VPP-4.3 5.1.11")
 def check_all_instr_attributes():
     with open_inst() as inst:

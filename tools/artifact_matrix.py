@@ -208,21 +208,25 @@ def main() -> int:
     w("</section>")
 
     w("""<section class="note warn">
-<p><b>What the totals are worth: not much.</b> Every check here has been
-iterated against PyVISA-py's behaviour and none against NI's. When one failed
-PyVISA-py for a reason that was the check's fault it got relaxed &mdash; four
-times in a single afternoon &mdash; and nobody was doing that for NI-VISA, so
-the ratchet only ever turned one way.</p>
-<p><b>The size of that effect, measured.</b> Correcting four over-fitted checks
-took NI-VISA from 18 failures to 11 and R&amp;S from 26 to 19, while PyVISA-py
-shed none. The raw comparison had overstated PyVISA-py's lead by about 40%
-before anyone triaged a single case.</p>
-<p><b>What survived is the part with citations.</b> Every check that evaporated
-was one citing no spec clause; every one that survived cites one. Seven for
-seven. So an uncited check is suspect until a clause is found for it &mdash; not
-because a citation makes a check correct, but because writing one forces the
-question &ldquo;what says so?&rdquo;, which is exactly what an over-fitted check
-cannot answer.</p>
+<p><b>Where these checks come from decides what they can find.</b> The first
+version of this suite grew out of one written against PyVISA-py, so its checks
+encoded PyVISA-py's behaviour. Across 115 of them there was <em>no</em> case
+where PyVISA-py failed and both vendors passed &mdash; which read as
+reassuring, and was mostly an artefact. Checks that describe one
+implementation cannot, by construction, find much that implementation does
+uniquely wrong.</p>
+<p><b>Rewriting them from spec clauses produced eight such cases
+immediately.</b> Same instrument, same three implementations, same mock server.
+Lock nesting, the event-enable rules, four required attributes, required
+operations raising instead of reporting, and a resource name whose class suffix
+is matched case-sensitively &mdash; all confirmed: PyVISA-py fails, NI-VISA and
+R&amp;S VISA both pass.</p>
+<p><b>So the totals still are not a score, but the citations are load-bearing.</b>
+When a check fails on all three, the rule is to suspect the check &mdash; and
+twice that was right, once because a spec version number tracks the calendar
+rather than correctness, once because no implementation at all does what the
+clause says. An uncited check is suspect until a clause is found for it, because
+writing one forces the question &ldquo;what says so?&rdquo;</p>
 </section>""")
 
     w('<section><h3>Every check, by source script</h3><div class="scroll"><table>')

@@ -238,7 +238,60 @@ found doing it. Worth treating as one defect with three instances rather than
 three defects: the pattern is an unimplemented operation raising rather than
 returning.
 
-### What the vendor run settled
+### What the vendor runs settled
+
+Both transports have now been through NI-VISA 26.5.0 and R&S VISA 5.12.9.
+**Eleven findings are confirmed over HiSLIP and eight over VXI-11** -- meaning
+pyvisa-py fails and both vendors pass. The HiSLIP set is the superset:
+
+| clause | what pyvisa-py does | HiSLIP | VXI-11 |
+| --- | --- | --- | --- |
+| 3.2.3 | `VI_ATTR_RSRC_SPEC_VERSION` unsupported | confirmed | confirmed |
+| 3.2.5 | `VI_ATTR_MAX_QUEUE_LENGTH` unsupported | confirmed | confirmed |
+| 3.3.2 | `viClose(VI_NULL)` answers `VI_ERROR_INV_OBJECT` | confirmed | confirmed |
+| 3.4.2 | a termination character of `0x1FF` is stored as `511` rather than masked | confirmed | confirmed |
+| 3.6.17 | a 300-character shared-lock key is accepted | confirmed | n/a |
+| 3.6.28 | a nested exclusive lock is not reported | confirmed | confirmed |
+| 3.6.32 | the unlock leaving a lock held is not reported | confirmed | n/a |
+| 3.7.6 | `viEnableEvent(VI_HNDLR)` succeeds with no handler | confirmed | confirmed |
+| 3.7.13 | both callback modes at once is accepted | confirmed | confirmed |
+| 4.3.17 | the resource class suffix is case-sensitive | confirmed | confirmed |
+| 5.1.12 | four required message-based attributes missing | &mdash; | confirmed |
+| 5.1.17 | `VI_ATTR_TCPIP_PORT`, `VI_ATTP_TCPIP_NODELAY` missing | confirmed | n/a |
+| 5.1.72 | operations raise instead of returning a status | &mdash; | confirmed |
+
+Three checks needed correcting first, all of them mine, and two were the *same
+mistake made twice*: asserting plain `VI_SUCCESS` where VPP-4.3 defines a
+distinct `VI_SUCCESS_NESTED_*` completion code, so NI-VISA failed a rule it
+implements correctly. The third was measuring the test rig -- NI normalises the
+port out of the canonical resource name, which cannot then reopen a mock
+listening on an ephemeral port.
+
+### A rule no implementation satisfies
+
+5.1.11 requires `VI_ATTR_TRIG_ID` of every INSTR resource. pyvisa-py, NI-VISA
+and R&S VISA all answer `VI_ERROR_NSUP_ATTR` for it on a TCPIP session.
+
+Three independent implementations agreeing is evidence about the clause rather
+than about the implementations: the attribute selects a hardware trigger line,
+which a TCPIP session does not have, so the requirement reads as drafted for
+the backplane interfaces and applied to INSTR generally. The suite records it
+and would want a second look if it ever started passing.
+
+### Findings that belong to the vendors
+
+Recorded because the suite exists to find disparities, not to prosecute one
+implementation:
+
+- **R&S VISA**: `viWaitOnEvent` does not dequeue an event whose type was
+  disabled after it arrived. 3.7.21 drains the queue regardless of enabled
+  state and 3.7.23 says so for exactly this case. pyvisa-py and NI both get it
+  right, and it is the rule most likely to be got wrong by an implementation
+  that treats *disabled* as *empty*.
+- **R&S VISA**: shared locks over HiSLIP are refused outright with
+  `VI_ERROR_INV_PROTOCOL`, where both others grant them.
+
+### What the first vendor run settled
 
 Eight of the pending hypotheses are now confirmed findings: **pyvisa-py fails,
 NI-VISA and R&S VISA both pass.**
