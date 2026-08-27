@@ -371,36 +371,48 @@ The VXI-11 column is the larger gap, and `VI_ATTR_IO_PROT` appears in it, which
 matches the separately-recorded observation that the attribute reads back over
 HiSLIP and not over VXI-11. 5.1.12 makes it required on both.
 
-### A mis-addressed Data message is accepted, and the reply silently truncated
+### Retracted: the Data-chunk "truncation" was the check's fault, twice
 
-**Status:** open. HiSLIP. The most serious client-side finding here.
+This was recorded, and reported, as the most serious client-side finding here:
+a mis-addressed `Data` chunk in a 500-byte reply produced 381 bytes and no
+error, which was called silent truncation. **It was wrong.** All three
+implementations behave identically and all three are conforming.
 
-IVI-6.1 3.1.2 rule 2: on receiving a `Data` message whose MessageID is not the
-one last sent, the client shall clear any buffered responses and discard the
-message. pyvisa-py implements rule 1, the `DataEND` case, correctly -- and does
-not implement rule 2.
+Two separate mistakes, and the second is the more embarrassing:
 
-Splitting a 500-byte reply into `Data`(120) + `DataEND`(380) and skewing the
-MessageID on the `Data` message, pyvisa-py returns **381 bytes and no error**.
-The mis-addressed chunk is dropped and the rest is handed to the caller as a
-complete reply.
+**The assertion misread the rule.** IVI-6.1 3.1.2 rule 2 says the client
+"shall clear any Data responses already buffered and discard the offending Data
+message". It does not say abort the read or report an error. When a
+mis-addressed `Data` chunk is followed by a correctly-addressed `DataEND`, the
+conforming outcome is precisely that the chunk's bytes never reach the caller
+and the `DataEND` completes the message. 500 minus the 120-byte chunk the
+client was required to throw away is 380. The suite's own rule caught it --
+all three failing means suspect the check -- but only after the claim had been
+made out loud.
 
-Silent truncation is the worst available outcome. A wrong MessageID means the
-client and server disagree about which request is being answered, and nothing
-downstream can tell that the value it received is 76% of the real one. An error
-would be recoverable; this is not detectable.
+**The corrected assertion could not tell the cases apart.** The rewritten
+check compared the reply against the discarded chunk's bytes, using
+`TEST:BIG?`, whose payload is a repeating digit pattern. The discarded chunk
+and the kept remainder are byte-identical under that pattern, so the check
+reported a conforming client as non-conforming for a completely different
+reason. Degenerate test data will confirm whatever you already believe.
 
-**Why it went unfound until now.** ugpibd chunks a reply only when it exceeds
-the maximum the client declared, and pyvisa-py declares a megabyte, so every
-reply arrived as a single `DataEND` and no `Data` message ever existed. The
-check for rule 2 skipped for months of wall-clock and, in its first version,
-armed a fault that could not fire and reported the resulting success as a
-failure. The proxy now splits a reply into the same shape a real server
-produces against a client with a smaller maximum, which makes both rule 2 and
-the chunked-reassembly path testable at all.
+With two distinguishable halves -- 120 `A`s then 380 `B`s -- the answer is
+unambiguous: 380 bytes delivered, no `A` anywhere in them. pyvisa-py, NI-VISA
+and R&S VISA all discard the mis-addressed chunk exactly as the rule requires.
 
-The positive control passes: an unskewed `Data` + `DataEND` pair reassembles to
-the full 500 bytes.
+### New coverage this produced anyway
+
+Making the reply chunk was still worth doing. The `Data` path had never been
+exercised by anything -- ugpibd splits a reply only when it exceeds the maximum
+the client declared, and pyvisa-py declares a megabyte, so every reply arrived
+as a single `DataEND`. Two checks now cover it, and all three implementations
+pass both:
+
+- a reply arriving as `Data` + `DataEND` reassembles to the full 500 bytes
+  (IVI-6.1 3.1.1);
+- a mis-addressed `Data` chunk is dropped rather than delivered
+  (IVI-6.1 3.1.2 rule 2).
 
 ### The resource template is largely unimplemented (VPP-4.3 3.2, 3.3, 3.4, 3.7)
 

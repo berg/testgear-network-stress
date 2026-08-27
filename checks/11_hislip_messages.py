@@ -161,30 +161,47 @@ def check_chunked_reply():
         return "500B across Data + DataEND"
 
 
-@check("a Data message with the wrong MessageID is discarded",
+@check("a mis-addressed Data chunk is dropped, not delivered",
        rule="IVI-6.1 3.1.2")
 def check_data_id_mismatch():
-    """3.1.2 rule 2, the same requirement for a non-final Data message.
+    """3.1.2 rule 2, read carefully.
 
-    Reaching it needs a Data message to exist, and this server sends every
-    reply as a single DataEND however large. So the reply is split first --
-    a legitimate shape, not a fault -- and the MessageID on the resulting Data
-    message is then skewed.
+    The rule says the client "shall clear any Data responses already buffered
+    and discard the offending Data message". It does *not* say abort the read
+    or report an error. So when a mis-addressed `Data` chunk is followed by a
+    correctly-addressed `DataEND`, the conforming outcome is that the chunk's
+    bytes never reach the caller and the DataEND completes the message.
 
-    An earlier version armed the skew without arranging for a Data message,
-    so the fault could never fire and the resulting success was reported as a
-    client failure. The split is what makes the check mean anything.
+    The first version of this check asserted the opposite -- that a short
+    reply was a failure -- and reported a 381-byte result from a 500-byte
+    reply as silent truncation. All three implementations return exactly that,
+    which is what a conforming client does: 500 minus the 120-byte chunk it
+    was required to throw away. The suite's own rule caught it, that an
+    all-three failure means suspect the check.
+
+    What is worth checking is that the dropped chunk really is dropped rather
+    than passed along.
     """
     srv = server()
-    srv.big_reply(500)
+    # Distinguishable halves. TEST:BIG? is a repeating digit pattern, so the
+    # discarded chunk's bytes are indistinguishable from the kept ones and the
+    # check cannot tell a conforming client from a non-conforming one -- it
+    # passed and failed for the same reason. Two different characters make the
+    # question answerable.
+    head, tail = "A" * 120, "B" * 380
+    srv.respond("TEST:SPLIT?", head + tail)
+    cut = len(head)
     with open_inst() as inst:
         inst.timeout = 2000
         srv.reset()
-        with srv.hislip_faults(split_data_end_at=120, skew_data_id=6):
+        with srv.hislip_faults(split_data_end_at=cut, skew_data_id=6):
             try:
-                reply = inst.query("TEST:BIG?")
+                reply = inst.query("TEST:SPLIT?").strip()
             except Exception as exc:  # noqa: BLE001
-                return f"discarded, reported as {visa.visa_status(exc)}"
+                # Refusing the whole exchange is stricter than the rule asks
+                # and equally safe: the caller gets nothing rather than
+                # something wrong.
+                return f"the exchange was refused: {visa.visa_status(exc)}"
 
         kinds = {
             m["message_type"] for m in srv.hislip_messages() if m["from"] == "server"
@@ -194,11 +211,14 @@ def check_data_id_mismatch():
                 "the reply did not split, so there was no Data message to "
                 "mis-address and rule 2 was not reached"
             )
-        raise AssertionError(
-            f"a Data message with a MessageID six higher than the request's "
-            f"was accepted and {len(reply)} bytes were returned. 3.1.2 rule 2 "
-            f"requires it to be discarded and any buffered response cleared"
+
+        assert "A" not in reply, (
+            f"the mis-addressed Data chunk was delivered to the caller: "
+            f"{reply.count('A')} of its {cut} bytes appear in the reply, where "
+            f"3.1.2 rule 2 requires the chunk to be discarded"
         )
+        assert reply, "the mis-addressed chunk took the whole reply with it"
+        return f"{len(reply)}B delivered, the {cut}B mis-addressed chunk dropped"
 
 
 @check("the session recovers after a discarded message", rule="IVI-6.1 3.1.2")
