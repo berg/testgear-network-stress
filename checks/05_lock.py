@@ -84,13 +84,19 @@ def main() -> int:
                         lib.lock, sess, constants.Lock.shared, 2000, "stress-shared"
                     )
                     if st == StatusCode.error_invalid_protocol:
-                        # Not a failure, an implementation difference worth
-                        # stating: R&S refuses shared locks over HiSLIP
-                        # outright, where NI and pyvisa-py grant them.
-                        stats.skip(
-                            "the shared-lock cycles: this implementation "
-                            "refuses shared locks on this transport "
-                            f"({st!r})"
+                        # This was a skip, on the assumption that an
+                        # implementation refusing shared locks over HiSLIP had
+                        # a reason and the check was overreaching. It does not:
+                        # RULE 3.6.3 says every VISA resource SHALL support
+                        # both exclusive and shared locks, and RULE 3.6.5 names
+                        # shared locks explicitly for HiSLIP sessions. Refusing
+                        # them outright is a rule violation, and excusing it
+                        # here was assuming a vendor must be right -- which is
+                        # exactly as unfounded as assuming pyvisa-py must be
+                        # wrong.
+                        stats.error(
+                            "shared locks are refused on this transport",
+                            rule="VPP-4.3 3.6.3, 3.6.5",
                         )
                         break
                     # The key comes back as bytes from some implementations

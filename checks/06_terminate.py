@@ -53,9 +53,11 @@ def main() -> int:
                 stats.write_outputs(args)
                 return stats.finish()
 
-            # A long timeout so the read is genuinely blocked rather than
-            # about to expire on its own.
-            inst.timeout = 30000
+            # Long enough that the read is genuinely blocked rather than
+            # about to expire on its own, short enough that an implementation
+            # which never aborts does not cost a full timeout per iteration.
+            blocked_timeout_s = 8.0
+            inst.timeout = int(blocked_timeout_s * 1000)
             durations: list[float] = []
             aborted: list = []
             unblocked: list = []
@@ -86,7 +88,7 @@ def main() -> int:
                 if st != StatusCode.success:
                     stats.error(f"iteration {i}: viTerminate returned {st!r}")
 
-                thread.join(timeout=30.0)
+                thread.join(timeout=blocked_timeout_s + 10.0)
                 if thread.is_alive():
                     stats.error(f"iteration {i}: the blocked read never returned")
                     break
@@ -109,14 +111,19 @@ def main() -> int:
                 # gets nothing on NI over HiSLIP -- but it is not a rule
                 # violation, and failing it would again be treating
                 # pyvisa-py's behaviour as the standard.
-                if outcome["elapsed"] > 25:
+                if outcome["elapsed"] > blocked_timeout_s * 0.8:
+                    # Stop here. Every further iteration costs a full timeout
+                    # to re-learn the same fact, which turned a 30-second
+                    # script into a twelve-minute one against NI.
                     unblocked.append(False)
                     stats.note(
                         f"iteration {i}: viTerminate returned success but the "
-                        f"read ran its full timeout ({outcome['elapsed']:.1f}s)"
+                        f"read ran its full timeout ({outcome['elapsed']:.1f}s); "
+                        f"not repeating the remaining "
+                        f"{args.iterations - i - 1} iterations"
                     )
-                else:
-                    unblocked.append(True)
+                    break
+                unblocked.append(True)
 
                 # The whole point: the session is usable immediately after.
                 try:
