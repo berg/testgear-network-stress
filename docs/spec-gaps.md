@@ -1,11 +1,18 @@
 # Spec gaps
 
-**Current state:** 139 of 854 normative statements are cited by a check, up
-from 33 when this suite was first pointed at the specs. Of the remainder, 147
-are client-testable and untouched -- that is the real queue, and
-`tools/spec_rules.py` prints the triage that produces the number. The rest bind
-other interfaces, bind the instrument server, or state no single observable
-behaviour.
+**Current state: 140 of 239 covered** -- that is, of the normative statements a
+TCPIP INSTR *client* can actually be held to. It was 33 when this suite was
+first pointed at the specs.
+
+The raw total is 854, and quoting that as a denominator would be flattering
+nobody: 145 of those bind GPIB, USB, PXI, serial or the VXI backplane, 44 bind
+the instrument server, and 172 define terms or state things with no single
+observable behaviour. `tools/spec_rules.py` prints that triage, and tightening
+it is worth doing whenever the queue looks wrong -- all 49 rules of VPP-4.3 6.3
+sat in the queue for a while purely because register-access rules mention
+`VI_ERROR`, and none of them binds a message-based session at all.
+
+99 client-testable requirements remain.
 
 ## Done
 

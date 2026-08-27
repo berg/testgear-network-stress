@@ -140,8 +140,17 @@ def parse_shall(text: str, spec: str) -> list[dict]:
 #: can be held to it.
 OTHER_INTERFACE = re.compile(
     r"\b(GPIB|USB|PXI|ASRL|serial|VXI backplane|backplane|VME|mainframe|slot|"
-    r"register|SOCKET resource|INTFC|BACKPLANE|SERVANT|MEMACC)\b",
+    r"register|SOCKET resource|INTFC|BACKPLANE|SERVANT|MEMACC|BERR)\b",
     re.IGNORECASE,
+)
+#: The register-access family. These name operations a *message-based* session
+#: does not have -- viIn8, viMove, viMapAddress and the rest belong to
+#: register-based resources -- so a rule about them binds no TCPIP INSTR
+#: client. Without this they classify as client-testable purely because they
+#: mention VI_ERROR, which put all 49 of VPP-4.3 6.3 in the queue by mistake.
+REGISTER_BASED = re.compile(
+    r"\bvi(In|Out|Move|Map|Unmap|Peek|Poke|MemAlloc|MemFree|Assert(Util|Intr)Signal)"
+    r"[A-Za-z0-9]*\(\)"
 )
 #: A requirement on the instrument server rather than on the client.
 SERVER_SIDE = re.compile(r"network instrument server SHALL|the server shall", re.IGNORECASE)
@@ -160,6 +169,8 @@ def triage(rule: dict) -> str:
     of VXI-11 binds the server. Sorting them is what turns 854 into a queue.
     """
     text = rule.get("text", "")
+    if REGISTER_BASED.search(text):
+        return "other interface"
     if OTHER_INTERFACE.search(text) and not re.search(
         r"TCPIP|HiSLIP|VXI-11", text, re.IGNORECASE
     ):
@@ -278,6 +289,14 @@ def write_report(out: Path, rules, found_specs, cites) -> None:
         "",
         f"{len(rules)} normative statements found, {len(covered)} currently touched",
         "by at least one check.",
+        "",
+        "That raw ratio is not the interesting one. Most of these requirements",
+        "bind interfaces a TCPIP client cannot reach, or the instrument server,",
+        "or state no single observable behaviour. Against the requirements a",
+        "TCPIP INSTR **client** can actually be held to:",
+        "",
+        f"> **{len(covered)} of {len(covered) + sum(1 for r in rules if r.get('bucket') == 'client-testable')} "
+        "covered.**",
         "",
         "| spec | document | statements | cited by a check |",
         "| --- | --- | --- | --- |",

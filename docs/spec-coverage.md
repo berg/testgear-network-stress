@@ -7,6 +7,13 @@ enough to say what a rule is about; read the clause in your own copy.
 854 normative statements found, 140 currently touched
 by at least one check.
 
+That raw ratio is not the interesting one. Most of these requirements
+bind interfaces a TCPIP client cannot reach, or the instrument server,
+or state no single observable behaviour. Against the requirements a
+TCPIP INSTR **client** can actually be held to:
+
+> **140 of 239 covered.**
+
 | spec | document | statements | cited by a check |
 | --- | --- | --- | --- |
 | VPP-4.3 | The VISA Library | 561 | 83 |
@@ -20,9 +27,9 @@ requirements, triaged:
 
 | bucket | count | meaning |
 | --- | --- | --- |
-| client-testable | 152 | the actual queue |
+| client-testable | 99 | the actual queue |
 | prose or definitional | 172 | no single observable behaviour, or defines a term |
-| other interface | 92 | GPIB, USB, PXI, serial, VXI backplane |
+| other interface | 145 | GPIB, USB, PXI, serial, VXI backplane |
 | server-side | 44 | binds the instrument server, not the client |
 
 Coverage is computed from the `rule=` annotations on the checks, so a
