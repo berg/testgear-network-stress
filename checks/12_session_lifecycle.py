@@ -39,27 +39,35 @@ def open_inst(**kwargs):
     )
 
 
-@check("VI_ATTR_RSRC_SPEC_VERSION is 00700200h", rule="VPP-4.3 3.2.3")
+@check("VI_ATTR_RSRC_SPEC_VERSION is readable", rule="VPP-4.3 3.2.3")
 def check_spec_version():
-    """3.2.3 gives this attribute one legal value.
+    """3.2.3 fixes the value at 00700200h for *this* revision of VPP-4.3.
 
-    It names the VISA specification revision the resource implements, so a
-    caller keying behaviour off it is keying off a promise. A backend
-    reporting something else is claiming to implement a document that does
-    not exist.
+    The exact value is not asserted, because it is a revision number and
+    implementations track different revisions: NI-VISA answers 0x00700000
+    (VISA 7.0) against a 2024 document that says 0x00700200 (7.2). Failing an
+    implementation for being built against an earlier edition of the spec
+    would be measuring the calendar.
+
+    What is asserted is that the attribute exists and looks like a VISA
+    version, since a caller reads it precisely to find out which revision it
+    is talking to -- and an implementation that cannot answer leaves that
+    caller with nothing.
     """
     with open_inst() as inst:
         value, st = visa.call(
             inst.visalib.get_attribute, inst.session, RA.resource_spec_version
         )
         assert st == StatusCode.success, (
-            f"VI_ATTR_RSRC_SPEC_VERSION is not readable ({st!r})"
+            f"VI_ATTR_RSRC_SPEC_VERSION is not readable ({st!r}); 3.2.3 gives "
+            f"it a defined value, so it has to be there to have one"
         )
-        assert value == RSRC_SPEC_VERSION, (
-            f"expected {RSRC_SPEC_VERSION:#010x}, got "
-            f"{value:#010x}" if isinstance(value, int) else f"got {value!r}"
+        assert isinstance(value, int) and (value >> 20) >= 1, (
+            f"VI_ATTR_RSRC_SPEC_VERSION reads {value!r}, which is not a "
+            f"version number"
         )
-        return f"{value:#010x}"
+        note = "" if value == RSRC_SPEC_VERSION else " (an earlier revision than this document)"
+        return f"{value:#010x}{note}"
 
 
 @check("VI_ATTR_MAX_QUEUE_LENGTH is writeable before viEnableEvent",
@@ -160,17 +168,19 @@ def check_string_attribute_length():
         return f"{len(text)} characters"
 
 
-@check("an unsupported attribute state is refused, not accepted",
+@check("an out-of-range attribute state is not stored verbatim",
        rule="VPP-4.3 3.4.2")
 def check_unsupported_attribute_state():
-    """3.4.2: a valid-but-unsupportable state returns VI_ERROR_NSUP_ATTR_STATE.
+    """3.4.2 says a state the resource cannot honour returns
+    VI_ERROR_NSUP_ATTR_STATE. In practice *no* implementation refuses here:
+    pyvisa-py, NI and R&S all accept a termination character of 0x1FF.
 
-    The failure mode this guards is the same silent one as 3.2.6: accepting a
-    setting the resource cannot honour leaves the caller believing something
-    about the session that is not true.
-
-    Termination character is the vehicle here because every INSTR session has
-    one and a value above 0xFF cannot be a character.
+    So the rule as written is not what this checks. What separates them is
+    what happens next -- NI masks the value to 0xFF, and pyvisa-py stores 511
+    and reads it back. A termination character is one byte on every transport
+    involved, so storing a value that cannot be one leaves the attribute
+    disagreeing with the wire, and a caller reading it back is told something
+    untrue about its own session.
     """
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
@@ -180,12 +190,15 @@ def check_unsupported_attribute_state():
         if original is not None:
             visa.call(lib.set_attribute, sess, RA.termchar, original)
 
-        assert st != StatusCode.success, (
-            f"a termination character of 0x1FF was accepted and the attribute "
-            f"now reads {value!r}; a value that cannot be a character is not a "
-            f"state the resource can honour"
+        if st != StatusCode.success:
+            return f"refused outright with {st!r}, which is what 3.4.2 asks for"
+        assert isinstance(value, int) and value <= 0xFF, (
+            f"a termination character of 0x1FF was accepted and reads back as "
+            f"{value} ({value:#x}). A termination character is one byte, so "
+            f"the attribute now disagrees with anything that can go on the "
+            f"wire"
         )
-        return f"refused with {st!r}"
+        return f"accepted and masked to {value:#04x}"
 
 
 @check("the resource name reads back as something that reopens",

@@ -14,9 +14,19 @@ of these from "disagrees with the spec" to "disagrees with a shipping
 implementation", and it demoted one entry to a non-finding -- which is the
 point of doing it.
 
-One calibration result worth stating plainly: across 115 VXI-11 checks there is
-**no case where pyvisa-py fails and both vendors pass**. Where pyvisa-py is
-wrong it usually has company.
+**A calibration result that reversed, and the reversal is the interesting
+part.** The first vendor comparison found *no* case where pyvisa-py failed and
+both vendors passed, across 115 checks -- which read as reassuring. It was
+mostly an artefact. Those checks had grown out of a suite written against
+pyvisa-py, so they encoded its behaviour and could not, by construction, find
+much it did uniquely wrong.
+
+Rewriting the checks from spec clauses instead of from observed behaviour
+produced eight such cases immediately. That is the strongest argument this repo
+has for the citation discipline: the same instrument, pointed at the same three
+implementations, went from finding nothing to finding eight confirmed gaps
+purely because the checks were derived from what the document says rather than
+from what one implementation does.
 
 ---
 
@@ -228,6 +238,54 @@ found doing it. Worth treating as one defect with three instances rather than
 three defects: the pattern is an unimplemented operation raising rather than
 returning.
 
+### What the vendor run settled
+
+Eight of the pending hypotheses are now confirmed findings: **pyvisa-py fails,
+NI-VISA and R&S VISA both pass.**
+
+| clause | what pyvisa-py does |
+| --- | --- |
+| 3.6.28 | a nested exclusive lock is not reported (over VXI-11 it deadlocks the session against itself) |
+| 3.2.5 | `VI_ATTR_MAX_QUEUE_LENGTH` unsupported |
+| 3.3.2 | `viClose(VI_NULL)` answers `VI_ERROR_INV_OBJECT` |
+| 3.7.6 | `viEnableEvent(VI_HNDLR)` succeeds with no handler installed |
+| 3.7.13 | `VI_SUSPEND_HNDLR | VI_HNDLR` accepted |
+| 5.1.12 | four required message-based attributes missing |
+| 5.1.72 | required operations raise instead of returning a status |
+| 4.3.17 | the resource class suffix is matched case-sensitively |
+
+Two more are confirmed by one vendor and contradicted by the other, so they are
+weaker but not empty: 5.1.11's attribute list (R&S passes, NI also fails) and
+`viSetBuf` (NI passes, R&S also fails).
+
+Two checks failed on **all three**, which per this suite's own rule means
+suspect the check. Both were:
+
+- `VI_ATTR_RSRC_SPEC_VERSION` -- the value is a revision number and
+  implementations track different revisions. NI answers `0x00700000` (VISA 7.0)
+  against a 2024 document specifying `0x00700200` (7.2). Failing an
+  implementation for being built against an earlier edition is measuring the
+  calendar, so the check now asserts the attribute exists and names a version.
+  pyvisa-py still fails it, because it does not implement the attribute at all.
+- The 3.4.2 termination-character case -- *no* implementation refuses an
+  out-of-range value, so the rule as written is not what any of them does. What
+  separates them is what happens next: NI masks `0x1FF` to `0xFF`, pyvisa-py
+  stores `511` and reads it back. A termination character is one byte on every
+  transport here, so the attribute ends up disagreeing with anything that can go
+  on the wire. The check now tests that, which is the part that matters.
+
+### A finding about R&S VISA, not pyvisa-py
+
+`viWaitOnEvent` on R&S does **not** dequeue an event whose type was disabled
+after the event arrived. VPP-4.3 3.7.21 drains the queue regardless of enabled
+state, and 3.7.23 says so explicitly for this case. pyvisa-py and NI-VISA both
+get it right.
+
+Recorded because the suite exists to find disparities rather than to prosecute
+one implementation, and because it is the rule most likely to be got wrong by
+an implementation that treats *disabled* as *empty* -- which is exactly what
+appears to have happened here.
+
 ### Required INSTR attributes are missing (VPP-4.3 5.1.11, 5.1.12, 5.1.17)
 
 **Status:** open, vendor confirmation pending.
@@ -262,20 +320,16 @@ HiSLIP and not over VXI-11. 5.1.12 makes it required on both.
 
 ### The resource template is largely unimplemented (VPP-4.3 3.2, 3.3, 3.4, 3.7)
 
-**Status:** open, and **not yet confirmed against a vendor** -- the build host
-went off DNS before the comparison could run. Every entry cites a clause, which
-is the property that has so far predicted survival, but predicted is not
-confirmed. Treat this section as a hypothesis list.
-
-Both transports behave identically, which is itself informative: these are
-template-level rules, not transport ones.
+**Status:** open, and **confirmed**. NI-VISA and R&S VISA both pass every entry
+below that pyvisa-py fails. Both transports behave identically, which is itself
+informative: these are template-level rules, not transport ones.
 
 | clause | requirement | pyvisa-py |
 | --- | --- | --- |
-| 3.2.3 | `VI_ATTR_RSRC_SPEC_VERSION` is `00700200h` | not readable |
+| 3.2.3 | `VI_ATTR_RSRC_SPEC_VERSION` exists and names a VISA revision | not readable |
 | 3.2.5 / 3.2.6 | `VI_ATTR_MAX_QUEUE_LENGTH` is writeable until the first `viEnableEvent`, read-only after | unsupported entirely |
 | 3.3.2 | `viClose(VI_NULL)` returns `VI_WARN_NULL_OBJECT` | `VI_ERROR_INV_OBJECT` |
-| 3.4.2 | a state the resource cannot honour returns `VI_ERROR_NSUP_ATTR_STATE` | a termination character of `0x1FF` is accepted |
+| 3.4.2 | an out-of-range attribute state is not stored verbatim | a termination character of `0x1FF` reads back as `511` |
 | 3.7.6 | `viEnableEvent(VI_HNDLR)` with no handler returns `VI_ERROR_HNDLR_NINSTALLED` | succeeds |
 | 3.7.13 | `VI_SUSPEND_HNDLR | VI_HNDLR` returns `VI_ERROR_INV_MECH` | accepted |
 
