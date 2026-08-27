@@ -272,6 +272,14 @@ impl VirtualInstrument {
         Arc::new(Mutex::new(Self::new(pads, faults, observed)))
     }
 
+    /// Put every simulated device back to its power-on state.
+    pub fn reset_devices(&mut self) {
+        for dev in self.devices.values_mut() {
+            dev.reset();
+        }
+        self.srq_line = false;
+    }
+
     pub fn device_mut(&mut self, pad: u8) -> Result<&mut Device> {
         self.devices
             .get_mut(&pad)

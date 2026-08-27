@@ -230,6 +230,28 @@ class MockServer:
     def set_stb(self, bits: int, pad: int = 0) -> None:
         self._command(cmd="set_stb", pad=pad, bits=bits)
 
+    def hislip_messages(self) -> list[dict]:
+        """Every HiSLIP message header seen, in both directions.
+
+        The MessageID rules in IVI-6.1 3.1.2 are invisible through the VISA
+        API -- the sequence a client emits is a requirement in its own right,
+        and the only place it exists is the wire.
+        """
+        return self._command(cmd="hislip_messages")["messages"]
+
+    def set_hislip_faults(self, **config) -> None:
+        self._command(cmd="hislip_faults", config=config)
+
+    @contextlib.contextmanager
+    def hislip_faults(self, **config):
+        """Arm message-level HiSLIP faults for a block, then disarm."""
+        self.set_hislip_faults(**config)
+        try:
+            yield self
+        finally:
+            with contextlib.suppress(Exception):
+                self.set_hislip_faults()
+
     def set_vxi11_faults(self, **config) -> None:
         """Arm the RPC-level VXI-11 faults (error codes, maxRecvSize, ...)."""
         self._command(cmd="vxi11_faults", config=config)

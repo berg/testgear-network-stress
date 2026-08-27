@@ -28,6 +28,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::debug;
 
 use crate::faults::Faults;
+use crate::hislip_fault::Tracker as HislipTracker;
 use crate::vxi11_fault::Tracker;
 
 /// Accept on `listener` and proxy every connection to `upstream`.
@@ -40,14 +41,16 @@ pub async fn run(
     upstream: String,
     faults: Arc<Faults>,
     tracker: Option<Arc<Tracker>>,
+    hislip: Option<Arc<HislipTracker>>,
 ) -> Result<()> {
     loop {
         let (client, peer) = listener.accept().await?;
         let upstream = upstream.clone();
         let faults = faults.clone();
         let tracker = tracker.clone();
+        let hislip = hislip.clone();
         tokio::spawn(async move {
-            if let Err(err) = pump(client, &upstream, faults, tracker).await {
+            if let Err(err) = pump(client, &upstream, faults, tracker, hislip).await {
                 debug!(%peer, %err, "proxied connection ended");
             }
         });
@@ -59,6 +62,7 @@ async fn pump(
     upstream: &str,
     faults: Arc<Faults>,
     tracker: Option<Arc<Tracker>>,
+    hislip: Option<Arc<HislipTracker>>,
 ) -> Result<()> {
     let server = TcpStream::connect(upstream).await?;
     // Nagle would coalesce the segments the dribble knob exists to split, and
@@ -73,6 +77,7 @@ async fn pump(
     // *instrument side* does to the stream; corrupting what the client sent
     // would test the server, which is not what this suite is for.
     let call_tracker = tracker.clone();
+    let hislip_out = hislip.clone();
     let to_server = async move {
         let mut buf = vec![0u8; 65536];
         loop {
@@ -86,6 +91,12 @@ async fn pump(
             // be testing the server.
             if let Some(t) = &call_tracker {
                 t.observe_calls(&buf[..n]);
+            }
+            // Client->server HiSLIP headers are recorded but never altered:
+            // the MessageID sequence a client emits is itself a requirement
+            // (IVI-6.1 3.1.2), and it can only be checked by watching.
+            if let Some(h) = &hislip_out {
+                h.observe(&buf[..n], "client");
             }
             server_tx.write_all(&buf[..n]).await?;
         }
@@ -137,7 +148,13 @@ async fn pump(
             }
 
             forwarded += chunk.len() as u64;
-            let rewritten = tracker.as_ref().and_then(|t| t.rewrite_replies(chunk));
+            if let Some(h) = &hislip {
+                h.observe(chunk, "server");
+            }
+            let rewritten = tracker
+                .as_ref()
+                .and_then(|t| t.rewrite_replies(chunk))
+                .or_else(|| hislip.as_ref().and_then(|h| h.rewrite(chunk)));
             match &rewritten {
                 Some(body) => write_chunk(&mut client_tx, body, &faults).await?,
                 None => write_chunk(&mut client_tx, chunk, &faults).await?,

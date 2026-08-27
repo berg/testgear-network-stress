@@ -29,6 +29,7 @@ pub mod control;
 pub mod faults;
 pub mod frontend;
 pub mod hislip;
+pub mod hislip_fault;
 pub mod observe;
 pub mod proxy;
 pub mod virtual_instrument;

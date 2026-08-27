@@ -27,6 +27,7 @@ use tracing::debug;
 use crate::faults::{FaultConfig, Faults};
 use crate::observe::{Event, Observed};
 use crate::virtual_instrument::{Device, VirtualInstrument};
+use crate::hislip_fault::{HislipFaults, Tracker as HislipTracker};
 use crate::vxi11_fault::{Tracker, Vxi11Faults};
 
 /// What the harness can ask for.
@@ -56,6 +57,10 @@ pub enum Request {
     SetStb { pad: u8, bits: u8 },
     /// Arm the RPC-level VXI-11 faults.
     Vxi11Faults { config: Vxi11Faults },
+    /// Arm the message-level HiSLIP faults.
+    HislipFaults { config: HislipFaults },
+    /// Every HiSLIP message header seen, in both directions.
+    HislipMessages,
     /// Ping, so the harness can wait for the server to come up.
     Ping,
 }
@@ -66,6 +71,7 @@ pub enum Response {
     Ports(PortInfo),
     Faults(FaultConfig),
     Events { events: Vec<Event> },
+    Hislip { messages: Vec<crate::hislip_fault::Seen> },
     Ok { ok: bool },
     Error { error: String },
 }
@@ -86,6 +92,7 @@ pub struct Control {
     pub observed: Arc<Observed>,
     pub instrument: Arc<Mutex<VirtualInstrument>>,
     pub vxi11: Arc<Tracker>,
+    pub hislip: Arc<HislipTracker>,
 }
 
 pub async fn run(listener: TcpListener, ctl: Arc<Control>) -> Result<()> {
@@ -135,13 +142,27 @@ async fn handle(request: Request, ctl: &Control) -> Response {
         Request::Reset => {
             ctl.faults.reset();
             ctl.vxi11.clear();
+            ctl.hislip.clear();
             ctl.observed.clear();
+            // The instrument's queues too, or "reset" means everything except
+            // the state most likely to leak. A reply left unread by one check
+            // is what the next check's first query gets back, and it arrives
+            // looking like a client that answered the wrong question.
+            let mut guard = ctl.instrument.lock().await;
+            guard.reset_devices();
             Response::Ok { ok: true }
         }
         Request::Vxi11Faults { config } => {
             ctl.vxi11.set(config);
             Response::Ok { ok: true }
         }
+        Request::HislipFaults { config } => {
+            ctl.hislip.set(config);
+            Response::Ok { ok: true }
+        }
+        Request::HislipMessages => Response::Hislip {
+            messages: ctl.hislip.snapshot(),
+        },
         Request::Observed => Response::Events {
             events: ctl.observed.snapshot(),
         },

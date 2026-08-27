@@ -251,6 +251,10 @@ def write_report(out: Path, rules, found_specs, cites) -> None:
         "vendor comparison found that every uncited check in its disputed set was",
         "the check's own fault, so an uncited check has not earned coverage.",
         "",
+        "The hand-written gap analysis lives in "
+        "[`spec-gaps.md`](spec-gaps.md); this file is generated and would",
+        "overwrite it.",
+        "",
         "## Cited clauses",
         "",
         "| clause | checks |",
