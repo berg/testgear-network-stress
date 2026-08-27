@@ -191,6 +191,122 @@ def check_clear_flushes_buffers():
         )
 
 
+@check("the four REN modes RULE 6.5.6 requires of TCPIP are supported",
+       rule="VPP-4.3 6.5.6")
+def check_required_ren_modes():
+    """6.5.6 names them exactly: DEASSERT_GTL, ASSERT_ADDRESS,
+    ASSERT_ADDRESS_LLO and ADDRESS_GTL.
+
+    This settles a question this suite previously answered by reasoning. The
+    unaddressed modes had been ruled out because VXI-11 carries no RPC for
+    driving REN on its own (B.6.13, B.6.14) -- correct, as it turned out, but
+    an inference. 6.5.6 lists the required four, and they are exactly the
+    addressed ones, so refusing the rest is conforming by citation rather than
+    by argument.
+    """
+    from pyvisa import constants
+
+    required = (
+        ("VI_GPIB_REN_DEASSERT_GTL", constants.RENLineOperation.deassert_gtl),
+        ("VI_GPIB_REN_ASSERT_ADDRESS", constants.RENLineOperation.asrt_address),
+        (
+            "VI_GPIB_REN_ASSERT_ADDRESS_LLO",
+            constants.RENLineOperation.asrt_address_llo,
+        ),
+        ("VI_GPIB_REN_ADDRESS_GTL", constants.RENLineOperation.address_gtl),
+    )
+    with open_inst() as inst:
+        lib, sess = inst.visalib, inst.session
+        refused = []
+        for name, mode in required:
+            st = visa.status(lib.gpib_control_ren, sess, mode)
+            if st != StatusCode.success:
+                refused.append(f"{name} ({st!r})")
+        # Leave the instrument addressed and in remote, as the other suites
+        # expect to find it.
+        visa.status(
+            lib.gpib_control_ren, sess, constants.RENLineOperation.asrt_address
+        )
+        assert not refused, (
+            f"{len(refused)} of the four modes 6.5.6 requires were refused: "
+            f"{', '.join(refused)}"
+        )
+        return f"all four supported"
+
+
+@check("viFlush on an empty buffer does nothing rather than failing",
+       rule="VPP-4.3 6.2.5")
+def check_flush_empty_buffer():
+    """6.2.5: flushing an empty buffer performs no action on it.
+
+    "No action" has to include "no error": flushing defensively, without
+    knowing whether anything is buffered, is the ordinary way to call this.
+    """
+    from pyvisa import constants
+
+    with open_inst() as inst:
+        lib, sess = inst.visalib, inst.session
+        first = visa.status(
+            lib.flush, sess, constants.BufferOperation.discard_read_buffer
+        )
+        if first == visa.NOT_IMPLEMENTED:
+            raise Skip("viFlush is not implemented on this transport")
+        second = visa.status(
+            lib.flush, sess, constants.BufferOperation.discard_read_buffer
+        )
+        assert second == first, (
+            f"flushing an already-empty buffer returned {second!r} where the "
+            f"first flush returned {first!r}"
+        )
+        assert inst.query("*IDN?").strip(), "the session broke after two flushes"
+        return f"{second!r}"
+
+
+@check("VI_ATTR_USER_DATA agrees with its width-specific twin",
+       rule="VPP-4.3 3.2.8")
+def check_user_data_consistency():
+    """3.2.7 and 3.2.8: on a 32-bit framework VI_ATTR_USER_DATA equals
+    VI_ATTR_USER_DATA_32, and on a 64-bit one it equals VI_ATTR_USER_DATA_64.
+
+    Two names for one storage slot. A caller that writes through one and reads
+    through the other -- which is exactly what portable code does -- gets its
+    own value back or does not.
+    """
+    import struct
+
+    from pyvisa.constants import ResourceAttribute as RA
+
+    sixty_four = struct.calcsize("P") == 8
+    twin_name = "VI_ATTR_USER_DATA_64" if sixty_four else "VI_ATTR_USER_DATA_32"
+    twin = getattr(RA, "user_data_64" if sixty_four else "user_data_32", None)
+    if twin is None:
+        # Not a backend gap. pyvisa's ResourceAttribute enum has only
+        # VI_ATTR_USER_DATA, so the width-specific names cannot be reached
+        # through this API at all and no backend could satisfy the rule.
+        raise Skip(
+            f"pyvisa exposes no {twin_name}; 3.2.7/3.2.8 cannot be checked "
+            f"through this API, and the gap is pyvisa's rather than a "
+            f"backend's"
+        )
+
+    with open_inst() as inst:
+        lib, sess = inst.visalib, inst.session
+        _, st = visa.call(lib.set_attribute, sess, RA.user_data, 0x5A5A)
+        if st != StatusCode.success:
+            raise Skip(f"VI_ATTR_USER_DATA is not writeable here ({st!r})")
+        plain, plain_st = visa.call(lib.get_attribute, sess, RA.user_data)
+        sized, sized_st = visa.call(lib.get_attribute, sess, twin)
+        assert sized_st == StatusCode.success, (
+            f"{twin_name} is not readable ({sized_st!r}) on a "
+            f"{'64' if sixty_four else '32'}-bit framework"
+        )
+        assert plain_st == StatusCode.success and plain == sized, (
+            f"VI_ATTR_USER_DATA reads {plain!r} but {twin_name} reads "
+            f"{sized!r}; they name one storage slot"
+        )
+        return f"{plain!r} through both names"
+
+
 def main() -> int:
     parser = cli.build_parser(__doc__.splitlines()[0])
     args = parser.parse_args()

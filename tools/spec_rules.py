@@ -252,10 +252,6 @@ def main() -> int:
                     break
         rule["covered_by"] = sorted(set(hit[1])) if hit else []
 
-    if args.json:
-        Path(args.json).write_text(json.dumps(rules, indent=2))
-        print(f"inventory written to {args.json}")
-
     covered = [r for r in rules if r["covered_by"]]
     print(f"\n{len(rules)} normative statements, {len(covered)} touched by a check")
     buckets: dict[str, int] = {}
@@ -271,6 +267,12 @@ def main() -> int:
         s = [r for r in rules if r["spec"] == spec]
         c = [r for r in s if r["covered_by"]]
         print(f"  {spec:9} {len(c):3}/{len(s):3} covered")
+
+    # After bucketing, so the inventory carries the triage rather than being
+    # written a step too early and shipping without it.
+    if args.json:
+        Path(args.json).write_text(json.dumps(rules, indent=2))
+        print(f"inventory written to {args.json}")
 
     if args.out:
         write_report(Path(args.out), rules, found_specs, cites)

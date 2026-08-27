@@ -394,6 +394,15 @@ to say so -- pyvisa-py answers `VI_ERROR_NSUP_OPER`, NI and R&S both answer
 two conforming implementations, so it now accepts either and records which was
 used.
 
+**RULE 6.5.6 later settled it outright**, and is worth quoting because the
+conclusion above had been reached by inference: an INSTR implementation of
+`viGpibControlREN` for a TCPIP system SHALL support
+`VI_GPIB_REN_DEASSERT_GTL`, `VI_GPIB_REN_ASSERT_ADDRESS`,
+`VI_GPIB_REN_ASSERT_ADDRESS_LLO` and `VI_GPIB_REN_ADDRESS_GTL`. Exactly the four
+addressed modes, and nothing else. So refusing the unaddressed ones is
+conforming by citation rather than by argument, and the suite now checks the
+required four are all present -- which pyvisa-py passes on both transports.
+
 Likewise, VXI-11 locks are exclusive, per-link and non-nesting (RULE B.6.72).
 The protocol has no shared-lock concept and no field to carry a key, so a
 shared lock coming back with an empty key is not a backend that lost it.
