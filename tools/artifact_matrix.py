@@ -252,7 +252,12 @@ writing one forces the question &ldquo;what says so?&rdquo;</p>
     w("</tbody></table></div></section>")
 
     w("""<section class="note">
-<p><b>The two that matter.</b> With <code>maxRecvSize</code> reported as zero,
+<p><b>NI-VISA passes every check here.</b> 52 of 52, with 5 skipped for rules
+this transport cannot reach. That is the strongest evidence the checks
+themselves are sound: a mature reference implementation scoring perfectly
+against a set of assertions means the assertions are not arbitrary, and it is
+what lets the failures below be read as findings rather than as opinions.</p>
+<p><b>The two that matter most.</b> With <code>maxRecvSize</code> reported as zero,
 NI-VISA survives and returns its data while PyVISA-py and R&amp;S both hang
 forever &mdash; a missing bounds check, not an inevitability. Against a stalled
 connection with a 2000&nbsp;ms timeout, NI-VISA answers
