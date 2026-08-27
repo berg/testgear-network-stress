@@ -253,16 +253,26 @@ most likely to be got wrong: an event queued before its type was disabled is
 still dequeued (3.7.21, 3.7.23), rather than being lost by an implementation
 that treats *disabled* as *empty*.
 
-### viFlush raises NotImplementedError out of a VXI-11 session
+### viFlush is unimplemented on VXI-11, and raises rather than reporting
 
-**Status:** open. Both trees.
+**Status:** open. Both trees. Two rules, not one.
 
 `viFlush` on a VXI-11 session raises a bare Python `NotImplementedError` from
-`sessions.py`. An operation a backend does not implement is supposed to answer
-`VI_ERROR_NSUP_OPER`; a Python exception crossing the VISA boundary is a
-contract break independent of whether flush itself is implemented, because a
-caller has no reason to be catching it. In this suite it killed the run and
-took the remaining 30 checks with it until the harness was taught to trap it.
+`sessions.py`.
+
+**RULE 5.1.72** settles the first half: an INSTR resource implementation for a
+TCPIP system SHALL support `viFlush`, among a list of twenty-three operations.
+It is required, not optional, so this is a missing feature rather than a
+reasonable omission -- which is how it was first recorded here, before the
+clause was read.
+
+**The second half stands on its own.** Even for an operation a backend
+genuinely does not implement, the answer owed is `VI_ERROR_NSUP_OPER`. A Python
+exception crossing the VISA boundary cannot be caught by a caller who had no
+reason to expect it, and in this suite it killed the run and took the remaining
+30 checks with it until the harness was taught to trap it.
+
+The HiSLIP session implements flush and returns a status.
 
 The HiSLIP session implements flush and returns a status.
 
