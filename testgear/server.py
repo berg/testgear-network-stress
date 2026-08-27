@@ -128,6 +128,9 @@ class MockServer:
             str(binary),
             "--host", self.host,
             "--pads", ",".join(str(p) for p in self._pads),
+            # stop() is the usual path, but a watchdog killing a wedged check
+            # never reaches it. This makes the control socket closing enough.
+            "--exit-with-parent",
         ]
         if not self._proxy:
             argv.append("--no-proxy")

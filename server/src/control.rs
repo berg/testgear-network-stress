@@ -98,13 +98,23 @@ pub struct Control {
     pub hislip: Arc<HislipTracker>,
 }
 
-pub async fn run(listener: TcpListener, ctl: Arc<Control>) -> Result<()> {
+pub async fn run(
+    listener: TcpListener,
+    ctl: Arc<Control>,
+    exit_with_parent: bool,
+) -> Result<()> {
     loop {
         let (stream, _) = listener.accept().await?;
         let ctl = ctl.clone();
         tokio::spawn(async move {
             if let Err(err) = serve(stream, ctl).await {
                 debug!(%err, "control connection ended");
+            }
+            if exit_with_parent {
+                // The supervisor is gone. Exiting here is what stops this
+                // process outliving the run that started it.
+                debug!("control connection closed; exiting with parent");
+                std::process::exit(0);
             }
         });
     }

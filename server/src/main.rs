@@ -73,6 +73,18 @@ struct Args {
     /// the proxy's extra copy is the thing being measured.
     #[arg(long)]
     no_proxy: bool,
+
+    /// Exit once the supervising control connection closes.
+    ///
+    /// The harness stops the server through that connection, but it does not
+    /// always get the chance: a watchdog that kills a wedged check, or any
+    /// hard exit, leaves the process with nobody to shut it down. It then
+    /// outlives the run holding its ports, and the next run contends with a
+    /// server that has stale state. The OS closes the socket however the
+    /// parent dies, so noticing the close is the one cleanup that cannot be
+    /// skipped.
+    #[arg(long)]
+    exit_with_parent: bool,
 }
 
 #[tokio::main]
@@ -217,7 +229,7 @@ async fn main() -> Result<()> {
         optional_proxy(vxi11_proxy, faults.clone(), Some(vxi11_tracker), None);
     let hislip_proxy_fut =
         optional_proxy(hislip_proxy, faults.clone(), None, Some(hislip_tracker));
-    let control_fut = control::run(control_listener, control);
+    let control_fut = control::run(control_listener, control, args.exit_with_parent);
 
     // Any one of these ending means the server is no longer serving what it
     // advertised. Failing the whole process is right: a half-dead mock
