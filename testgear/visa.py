@@ -15,6 +15,7 @@ that with `requires_pyvisa_py()` and skips cleanly elsewhere.
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import os
 import warnings
 
@@ -55,6 +56,11 @@ class _NotImplemented:
 NOT_IMPLEMENTED = _NotImplemented()
 
 
+class BadCall(Exception):
+    """A visalib call this suite made wrongly, not a fault in the backend."""
+
+
+
 def call(fn, *args, **kwargs):
     """Call a visalib operation, returning ``(value, status)``.
 
@@ -73,6 +79,13 @@ def call(fn, *args, **kwargs):
         return None, exc.error_code
     except NotImplementedError:
         return None, NOT_IMPLEMENTED
+    except ctypes.ArgumentError as exc:
+        # A ctypes-backed VISA rejects an argument a pure-Python one accepts,
+        # so a call written against pyvisa-py can be a hard TypeError against
+        # NI or R&S. Letting it escape kills the whole script and silently
+        # removes every check in the file from that column -- which reads as
+        # "not applicable" rather than "this run died".
+        raise BadCall(f"{getattr(fn, '__name__', fn)}: {exc}") from None
     if isinstance(result, tuple):
         return result[0], result[-1]
     return None, result

@@ -362,6 +362,8 @@ def main(main_fn) -> None:
     import pyvisa
     from pyvisa import constants, errors
 
+    from testgear import visa as _visa
+
     try:
         sys.exit(main_fn())
     except KeyboardInterrupt:
@@ -370,6 +372,12 @@ def main(main_fn) -> None:
     except (ConnectionError, BrokenPipeError) as exc:
         print(f"\nlost the connection: {type(exc).__name__}: {exc}")
         sys.exit(3)
+    except _visa.BadCall as exc:
+        # This suite called the library wrongly -- typically an argument a
+        # pure-Python backend tolerates and a ctypes one rejects. Exit 5 so it
+        # is never mistaken for a finding about the backend.
+        print(f"\nthis suite made a bad VISA call: {exc}")
+        sys.exit(5)
     except errors.VisaIOError as exc:
         if exc.error_code == constants.StatusCode.error_connection_lost:
             print(f"\nlost the connection: {exc}")

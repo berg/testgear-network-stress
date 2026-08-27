@@ -43,9 +43,10 @@ def main() -> int:
             # Probe once before committing to the loop: a backend that does
             # not implement viTerminate should cost a skip, not 25 identical
             # failures burying everything else in the file.
-            st = visa.status(lib.terminate, sess, None, None)
+            st = visa.status(lib.terminate, sess, 0, 0)
             if st in (
                 StatusCode.error_nonsupported_operation,
+                StatusCode.error_nonimplemented_operation,
                 visa.NOT_IMPLEMENTED,
             ):
                 stats.skip("viTerminate is implemented", f"not implemented here ({st!r})")
@@ -56,6 +57,8 @@ def main() -> int:
             # about to expire on its own.
             inst.timeout = 30000
             durations: list[float] = []
+            aborted: list = []
+            unblocked: list = []
 
             for i in range(args.iterations):
                 outcome: dict = {}
@@ -79,7 +82,7 @@ def main() -> int:
                 time.sleep(args.delay)
 
                 t0 = time.time()
-                st = visa.status(lib.terminate, sess, None, None)
+                st = visa.status(lib.terminate, sess, 0, 0)
                 if st != StatusCode.success:
                     stats.error(f"iteration {i}: viTerminate returned {st!r}")
 
@@ -90,17 +93,30 @@ def main() -> int:
 
                 durations.append(time.time() - t0)
 
-                if outcome.get("status") != StatusCode.error_abort:
-                    stats.error(
-                        f"iteration {i}: the blocked read returned "
-                        f"{outcome.get('status')!r}, expected VI_ERROR_ABORT"
-                    )
-                    break
+                # 3.5.1.1 says an implementation *should* abort, and that a
+                # terminated call *should* return VI_ERROR_ABORT -- then says
+                # plainly that "the specified return value is not guaranteed",
+                # and adds no implementation requirements. So the status is an
+                # observation, not an assertion: NI and R&S end the read with
+                # VI_ERROR_TIMEOUT and are conforming. Asserting VI_ERROR_ABORT
+                # here only encoded pyvisa-py's own behaviour as the standard.
+                aborted.append(outcome.get("status"))
+                # Whether terminate actually unblocks the read is the same
+                # "should" as the status above, so this is recorded rather
+                # than failed: NI returns VI_SUCCESS from viTerminate and
+                # leaves the read to run its full timeout. Worth reporting --
+                # a caller relying on viTerminate to cancel a blocked read
+                # gets nothing on NI over HiSLIP -- but it is not a rule
+                # violation, and failing it would again be treating
+                # pyvisa-py's behaviour as the standard.
                 if outcome["elapsed"] > 25:
-                    stats.error(
-                        f"iteration {i}: the read ran to timeout, not aborted"
+                    unblocked.append(False)
+                    stats.note(
+                        f"iteration {i}: viTerminate returned success but the "
+                        f"read ran its full timeout ({outcome['elapsed']:.1f}s)"
                     )
-                    break
+                else:
+                    unblocked.append(True)
 
                 # The whole point: the session is usable immediately after.
                 try:
@@ -126,11 +142,25 @@ def main() -> int:
                     f"{max(durations):.3f}s "
                     f"(mean {sum(durations) / len(durations):.3f}s)"
                 )
+                if unblocked and not any(unblocked):
+                    stats.note(
+                        "viTerminate never unblocked a read on this "
+                        "implementation (3.5.1.1 recommends it; it is not "
+                        "a SHALL)"
+                    )
+                seen = {repr(x) for x in aborted}
+                stats.note(
+                    "the terminated read ended with "
+                    + ", ".join(sorted(seen))
+                    + " (3.5.1.1 prefers VI_ERROR_ABORT but does not "
+                    "guarantee it)"
+                )
 
             # Terminating an idle session is a no-op, not an error.
             inst.timeout = args.timeout
-            st = visa.status(lib.terminate, sess, None, None)
-            stats.check(st == StatusCode.success, f"terminate while idle -> {st!r}")
+            st = visa.status(lib.terminate, sess, 0, 0)
+            stats.check(st == StatusCode.success, "terminate while idle succeeds",
+                        detail=f"got {st!r}")
             stats.check(
                 inst.query("*IDN?").strip() == idn,
                 "session healthy after an idle terminate",

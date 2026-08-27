@@ -193,8 +193,9 @@ def main() -> int:
                 )
                 stats.check(
                     st_b == StatusCode.success,
-                    f"session B joins the shared lock with A's key (got {st_b!r})",
+                    "session B joins the shared lock with A's key",
                     rule="VPP-4.3 3.6.2.1",
+                    detail=f"got {st_b!r}",
                 )
                 visa.status(other_lib.unlock, other_sess)
                 visa.status(lib.unlock, sess)
@@ -205,12 +206,34 @@ def main() -> int:
                 )
 
             # -- 6. still healthy ---------------------------------------------
-            stats.check(
-                bool(inst.query("*IDN?").strip()), "session A healthy at the end"
-            )
-            stats.check(
-                bool(other.query("*IDN?").strip()), "session B healthy at the end"
-            )
+            # Release anything either session is still holding first. The
+            # sections above take locks along paths that do not all end in an
+            # unlock -- an implementation that refuses a shared lock skips the
+            # release that was meant to follow it -- and a health query made
+            # while the *other* session holds a lock is refused for a reason
+            # that has nothing to do with health.
+            for lib_, sess_ in ((lib, sess), (other_lib, other_sess)):
+                for _ in range(4):
+                    if visa.status(lib_.unlock, sess_) != StatusCode.success:
+                        break
+
+            def healthy(resource):
+                """Query, turning a VISA error into a reportable status.
+
+                An unwrapped query here used to raise straight out of main and
+                kill the script, which removed all 13 of its checks from that
+                implementation's column -- displayed as blank cells, which read
+                as "not applicable" rather than "this run died".
+                """
+                try:
+                    return bool(resource.query("*IDN?").strip()), ""
+                except Exception as exc:  # noqa: BLE001
+                    return False, f"query was refused ({visa.visa_status(exc)})"
+
+            ok_a, why_a = healthy(inst)
+            stats.check(ok_a, "session A healthy at the end", detail=why_a)
+            ok_b, why_b = healthy(other)
+            stats.check(ok_b, "session B healthy at the end", detail=why_b)
             visa.check_errors(inst, stats, "at end of run")
 
         stats.write_outputs(args)
