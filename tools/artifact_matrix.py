@@ -396,6 +396,9 @@ def main() -> int:
 
     out: list[str] = []
     w = out.append
+    # The artifact host reads the title from the first 8KB, and uses it as
+    # the page's name in the tab and gallery. Keep it stable across redeploys.
+    w("<title>VISA Conformance Matrix</title>")
     w('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
       'family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700'
       '&family=IBM+Plex+Sans:wght@400;500&display=swap">')
