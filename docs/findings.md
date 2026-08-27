@@ -294,12 +294,90 @@ harness.
 
 ---
 
+## How much to trust the totals
+
+Not much. The per-implementation counts invite a reading they cannot support,
+and the bias runs one way.
+
+**The checks were tuned until pyvisa-py passed.** This suite grew out of one
+that existed to find bugs in pyvisa-py, on a branch that then fixed them. Every
+check in it has been iterated against pyvisa-py's behaviour; none was iterated
+against NI's. When a check failed pyvisa-py for a reason that turned out to be
+the check's fault, it was relaxed -- correctly, each time, and the termchar
+status code, the REN error code, the exclusive-lock key and the shared-lock key
+type were all relaxed in a single afternoon. But nobody was doing that for
+NI-VISA, so the ratchet only ever turned one way.
+
+The first vendor run measured the size of that effect by accident: of 17 checks
+that pyvisa-py passed and both vendors failed, 7 were checks already identified
+as over-fitted and relaxed *earlier the same day* -- the run simply predated the
+fix. Re-running with the corrected checks:
+
+| implementation | failures before | failures after |
+| --- | --- | --- |
+| PyVISA-py | 5 | 5 |
+| NI-VISA | 18 | 11 |
+| R&S VISA | 26 | 19 |
+
+Both vendors shed exactly 7, and pyvisa-py shed none. Before any triage at all,
+the raw comparison overstated pyvisa-py's lead by about 40%.
+
+**Both ends of the wire grew up together.** The mock is ugpibd's server, which
+has been exercised against pyvisa-py for months. That is not the failure this
+repo's README warns about -- the mock was not written alongside the checks -- but
+it is a close relative: a client and a server that have only ever been pointed
+at each other agree about more than the spec requires, and a third
+implementation arriving late looks wrong for differences that are nobody's bug.
+
+**What survives the discount.** Two things.
+
+A check that cites a spec clause is worth more than one that does not, because
+the clause is an authority outside the suite -- and that turns out to be a
+usable filter rather than good manners. Of the original 17, exactly the 7 with
+no clause cited were the over-fitted ones, and all 10 that survived the
+correction cite one. Seven for seven: every uncited check in that set was the
+check's fault, and none of the cited ones has been shown wrong yet.
+
+The rule that follows is cheap to apply: **an uncited check is suspect until a
+clause is found for it or it is deleted.** Not because a citation makes a check
+correct, but because writing one forces the question "what says so?", which is
+exactly the question an over-fitted check cannot answer.
+
+And the direction of the strongest results is the right way round. The two
+hardest checks here -- `maxRecvSize=0` and the stalled connection -- are ones
+NI-VISA passes and pyvisa-py fails, both written from a clause rather than from
+observed behaviour. A suite rigged to flatter pyvisa-py would not produce those,
+so the instrument is not simply broken; its aggregate is.
+
+**What would fix it.** Validate a new check against NI-VISA before trusting it,
+not after. Record every relaxation where it can be seen, so the ratchet is
+auditable instead of invisible. And report per-implementation rather than as a
+score, since the score is the part that misleads.
+
+---
+
 ## Not yet triaged
 
-The VXI-11 vendor run left 17 checks that pyvisa-py passes and **both** vendors
-fail, plus a cluster that only R&S fails (multiple sessions, error-queue
-cleanliness, recovery after a timeout). None of those are claims yet, in either
-direction.
+The VXI-11 vendor run leaves 10 checks that pyvisa-py passes and **both**
+vendors fail, plus a cluster that only R&S fails (multiple sessions,
+error-queue cleanliness, recovery after a timeout). None of those are claims
+yet, in either direction.
+
+All 10 cite a clause, which is why they survived the first correction pass and
+why they are worth the triage:
+
+| check | clause |
+| --- | --- |
+| a connection lost mid-reply is reported, not hung | VPP-4.3 3.2.2 |
+| a write larger than maxRecvSize is split | VXI-11 B.6.4 |
+| viLock waits for the lock rather than failing at once | VPP-4.3 3.6.2.1 |
+| VI_ATTR_RSRC_LOCK_STATE reflects a held lock | VPP-4.3 3.6.2.1 |
+| the session still works after a lock attempt failed | VPP-4.3 3.6.2.1 |
+| a device that answers a read with nothing still times out | VPP-4.3 3.2.2 |
+| the session recovers from a read timeout | VPP-4.3 3.2.2 |
+| VI_ATTR_TCPIP_KEEPALIVE can be turned on | VPP-4.3 3.5 |
+| VI_ATTR_SEND_END_EN=False suppresses END on the write | VXI-11 B.5.3 |
+| closing the session destroys the link | VXI-11 B.6.16 |
 
 Two readings are possible for each and they need separating one at a time:
 
@@ -311,7 +389,7 @@ A third possibility applies to at least one: `closing the session destroys the
 link` fails at *cycle 0* under both vendors, with a message asserting the
 server ran out of links. Failing on the very first iteration means the message
 is wrong about its own cause, so that one is a check bug before it is anything
-else.
+else -- a citation does not make a check right, it only makes it answerable.
 
 Until each has been through that, they stay here rather than in the lists
 above. A suite that reports 17 vendor failures it has not investigated is
