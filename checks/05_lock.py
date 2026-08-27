@@ -23,6 +23,18 @@ from pyvisa.constants import StatusCode  # noqa: E402
 from testgear import cli, harness, visa  # noqa: E402
 
 
+def _as_text(value) -> str:
+    """A lock key as text, whichever type the backend handed back.
+
+    pyvisa-py returns `str`, NI-VISA returns `bytes`. That difference is a
+    real disparity and is recorded as one, but every check that merely wants
+    to know whether the key round-tripped should not fail on it.
+    """
+    if isinstance(value, bytes):
+        return value.decode("ascii", "replace")
+    return "" if value is None else str(value)
+
+
 def main() -> int:
     parser = cli.build_parser(__doc__.splitlines()[0])
     args = parser.parse_args()
@@ -71,7 +83,21 @@ def main() -> int:
                     key, st = visa.call(
                         lib.lock, sess, constants.Lock.shared, 2000, "stress-shared"
                     )
-                    if st != StatusCode.success or key != "stress-shared":
+                    if st == StatusCode.error_invalid_protocol:
+                        # Not a failure, an implementation difference worth
+                        # stating: R&S refuses shared locks over HiSLIP
+                        # outright, where NI and pyvisa-py grant them.
+                        stats.skip(
+                            "the shared-lock cycles: this implementation "
+                            "refuses shared locks on this transport "
+                            f"({st!r})"
+                        )
+                        break
+                    # The key comes back as bytes from some implementations
+                    # and str from others, which is a disparity in its own
+                    # right (see docs/findings.md) but not this check's
+                    # subject -- compare on the decoded value.
+                    if st != StatusCode.success or _as_text(key) != "stress-shared":
                         stats.error(f"shared cycle {i}: {st!r}, key={key!r}")
                         break
                     if visa.status(lib.unlock, sess) != StatusCode.success:
@@ -86,14 +112,14 @@ def main() -> int:
                 )
 
             # -- 3. lock state tracking -------------------------------------
-            lib.lock(sess, constants.Lock.exclusive, 2000, None)
+            visa.status(lib.lock, sess, constants.Lock.exclusive, 2000, None)
             state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
             stats.check(
                 st == StatusCode.success and state == constants.VI_EXCLUSIVE_LOCK,
                 f"lock state reads back as exclusive (status {st!r}, {state!r})",
                 rule="VPP-4.3 3.6.2.1",
             )
-            lib.unlock(sess)
+            visa.status(lib.unlock, sess)
             state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
             stats.check(
                 st == StatusCode.success and state == constants.VI_NO_LOCK,

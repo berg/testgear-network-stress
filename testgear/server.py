@@ -27,6 +27,24 @@ class ServerUnavailable(RuntimeError):
     """The mock server binary could not be found or built."""
 
 
+def _can_bind_privileged_ports() -> bool:
+    """Whether port 111 is ours to take.
+
+    Root in a container can have it; a developer machine usually cannot,
+    because rpcbind is already there. Probing beats guessing from the uid:
+    the answer depends on the port being free as well as on privilege.
+    """
+    probe = socket.socket()
+    try:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind(("127.0.0.1", 111))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 def binary_path(build: bool = True) -> Path:
     """Locate the server binary, building it once if needed.
 
@@ -74,10 +92,24 @@ class MockServer:
         host: str = "127.0.0.1",
         proxy: bool = True,
         log_level: str | None = None,
+        portmap: bool | None = None,
     ):
         self.host = host
         self._pads = pads
         self._proxy = proxy
+        # A portmapper is what makes the VXI-11 server reachable by the
+        # standard resource name, and therefore by any VISA other than
+        # pyvisa-py, whose "host,port" shorthand is its own extension. It
+        # needs port 111, so it is on by default only where that is free:
+        # inside a container running as root. Set TESTGEAR_PORTMAP=1/0 to
+        # force it either way.
+        if portmap is None:
+            env = os.environ.get("TESTGEAR_PORTMAP")
+            if env is not None:
+                portmap = env not in ("", "0", "false", "no")
+            else:
+                portmap = _can_bind_privileged_ports()
+        self._portmap = portmap
         self._log_level = log_level
         self._process: subprocess.Popen | None = None
         self._control: socket.socket | None = None
@@ -97,6 +129,8 @@ class MockServer:
         ]
         if not self._proxy:
             argv.append("--no-proxy")
+        if self._portmap:
+            argv.append("--portmap")
 
         self._process = subprocess.Popen(
             argv,

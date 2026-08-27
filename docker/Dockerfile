@@ -37,11 +37,25 @@ ARG BACKEND=ni
 ENV BACKEND=${BACKEND}
 ENV DEBIAN_FRONTEND=noninteractive
 
+# git is not optional here. setuptools-scm shells out to it to derive
+# pyvisa-py's version at install time, and the provenance block shells out to
+# it again at run time to name the commit under test. Without it the install
+# fails outright and, if it did not, every report would be attributed to a
+# tree it could not identify.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv \
+        python3 python3-pip python3-venv git \
         ca-certificates curl gnupg \
         libusb-1.0-0 libxml2 udev kmod \
     && rm -rf /var/lib/apt/lists/*
+
+# NI's package scripts call systemctl, which does not exist in a container, so
+# dpkg leaves ni-visa unconfigured and the library never appears. A stub that
+# succeeds and says what it was asked to do gets the install through without
+# hiding the fact that a service was never actually started -- which matters,
+# because one of those services is LXI discovery and its absence is a real
+# difference from a normal NI installation.
+RUN printf '#!/bin/sh\necho "[systemctl stub] ignoring: $*" >&2\nexit 0\n' \
+        > /usr/bin/systemctl && chmod +x /usr/bin/systemctl
 
 # The installers, whatever the user dropped in. Copied as a directory so the
 # build does not fail when one vendor is absent -- a missing backend must be
@@ -107,6 +121,10 @@ RUN set -eux; \
 # the provenance block reports the checkout and its commit rather than a
 # version stamped at package time.
 COPY pyvisa-py/ /pyvisa-py/
+# git refuses to operate on a repository owned by another user, which is what
+# a COPY-ed tree looks like. Without this, setuptools-scm sees no version and
+# the provenance block reports no commit.
+RUN git config --global --add safe.directory /pyvisa-py
 RUN python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install --no-cache-dir pyvisa && \
     python3 -m pip install --no-cache-dir -e /pyvisa-py

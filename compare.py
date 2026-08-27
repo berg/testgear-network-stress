@@ -134,9 +134,14 @@ def main() -> int:
     parser.add_argument(
         "--timeout", type=float, default=600.0, help="per-script timeout in seconds"
     )
+    # The repo venv when there is one, otherwise whatever is running this --
+    # inside a container there is no venv, and defaulting to a path that does
+    # not exist makes every script "produce no report" for a reason the output
+    # never states.
+    default_python = HERE / ".venv" / "bin" / "python"
     parser.add_argument(
         "--python",
-        default=str(HERE / ".venv" / "bin" / "python"),
+        default=str(default_python if default_python.exists() else sys.executable),
         help="interpreter to run the checks with",
     )
     args, extra = parser.parse_known_args()

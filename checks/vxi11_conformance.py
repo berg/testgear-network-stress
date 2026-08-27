@@ -399,9 +399,9 @@ def check_lock_waits():
 def check_lock_state():
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
-        lib.lock(sess, constants.Lock.exclusive, 2000, None)
+        visa.status(lib.lock, sess, constants.Lock.exclusive, 2000, None)
         state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
-        lib.unlock(sess)
+        visa.status(lib.unlock, sess)
         assert st == StatusCode.success, (
             f"VI_ATTR_RSRC_LOCK_STATE is not readable ({st!r})"
         )

@@ -13,13 +13,21 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PY="${PY:-$HERE/.venv/bin/python}"
+# The repo venv when there is one, otherwise the system python -- inside a
+# container the suite is installed globally and there is no venv.
+if [[ -n "${PY:-}" ]]; then
+    :
+elif [[ -x "$HERE/.venv/bin/python" ]]; then
+    PY="$HERE/.venv/bin/python"
+else
+    PY="$(command -v python3)"
+fi
 SOAK="${SOAK:-60}"
 ITER="${ITER:-300}"
 REPORTS="${REPORTS:-}"
 
-if [[ ! -x "$PY" ]]; then
-    echo "no interpreter at $PY. Create one with:" >&2
+if [[ -z "$PY" || ! -x "$PY" ]]; then
+    echo "no usable python. Create the venv with:" >&2
     echo "  python3 -m venv .venv && ./.venv/bin/pip install -e /path/to/pyvisa-py" >&2
     exit 4
 fi

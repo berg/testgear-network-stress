@@ -153,8 +153,12 @@ def main() -> int:
             key, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "smoke-key")
             stats.check(st == StatusCode.success, f"shared lock {st!r}")
             if args.protocol == "hislip":
+                # bytes from NI-VISA, str from pyvisa-py. The type difference
+                # is a disparity in its own right (docs/findings.md); this
+                # check is about whether the key survived the round trip.
+                returned = key.decode("ascii", "replace") if isinstance(key, bytes) else key
                 stats.check(
-                    key == "smoke-key",
+                    returned == "smoke-key",
                     f"a shared lock returns its key, got {key!r}",
                     rule="VPP-4.3 3.6.2.1",
                 )
@@ -167,7 +171,12 @@ def main() -> int:
                     f"shared-lock key is not meaningful over VXI-11 "
                     f"(RULE B.6.72: locks are exclusive); got {key!r}"
                 )
-            lib.unlock(sess)
+            # Not a bare unlock: an implementation that refused the shared
+            # lock above has nothing to release, and viUnlock then raises
+            # VI_ERROR_SESN_NLOCKED and takes the rest of the file with it.
+            # R&S refuses shared locks over HiSLIP outright, which cost this
+            # script its last 20 checks.
+            visa.status(lib.unlock, sess)
 
             stats.check(
                 visa.status(lib.unlock, sess) == StatusCode.error_session_not_locked,

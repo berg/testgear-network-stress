@@ -55,6 +55,18 @@ struct Args {
     #[arg(long, value_delimiter = ',', default_values_t = [0u8, 14u8, 23u8])]
     pads: Vec<u8>,
 
+    /// Run a portmapper on port 111 advertising the VXI-11 core channel.
+    ///
+    /// Without this the only way to reach a VXI-11 server on an ephemeral
+    /// port is pyvisa-py's `TCPIP0::host,port::inst0::INSTR` shorthand, which
+    /// is a pyvisa-py extension: NI-VISA answers VI_ERROR_RSRC_NFOUND for it.
+    /// A real VXI-11 client asks the portmapper, so comparing against a
+    /// vendor implementation means providing one. Needs privilege to bind
+    /// 111, which is why it is opt-in rather than the default -- inside a
+    /// container it is free, on a developer machine rpcbind usually has it.
+    #[arg(long)]
+    portmap: bool,
+
     /// Serve the protocols directly, with no fault-injecting proxy in front.
     /// Transport faults stop working; useful when measuring throughput, where
     /// the proxy's extra copy is the thing being measured.
@@ -93,15 +105,36 @@ async fn main() -> Result<()> {
         .context("binding the control port")?;
     let control_port = control_listener.local_addr()?.port();
 
+    // With a portmapper the resource is the standard one every VISA
+    // understands. Without it, the "host,port" shorthand is the only way to
+    // name an ephemeral port -- and it is pyvisa-py's alone, so a run using it
+    // can only ever test pyvisa-py.
+    let vxi11_resource = if args.portmap {
+        format!("TCPIP0::{}::inst0::INSTR", args.host)
+    } else {
+        format!("TCPIP0::{},{}::inst0::INSTR", args.host, vxi11_public)
+    };
+
+    let portmap_listeners = if args.portmap {
+        let tcp = TcpListener::bind((args.host.as_str(), vxi11::portmap::PMAP_PORT))
+            .await
+            .context(
+                "binding port 111 for the portmapper (needs privilege, and \
+                 rpcbind may already hold it)",
+            )?;
+        let udp = tokio::net::UdpSocket::bind((args.host.as_str(), vxi11::portmap::PMAP_PORT))
+            .await
+            .context("binding udp/111 for the portmapper")?;
+        Some((tcp, udp))
+    } else {
+        None
+    };
+
     let ports = PortInfo {
         vxi11_port: vxi11_public,
         hislip_port: hislip_public,
         control_port,
-        // pyvisa accepts "host,port" in the board field, which is what makes
-        // a VXI-11 server on an ephemeral port reachable at all: the normal
-        // path asks the portmapper on 111, and a test that needed to bind a
-        // privileged port could not run unprivileged or in parallel.
-        vxi11_resource: format!("TCPIP0::{},{}::inst0::INSTR", args.host, vxi11_public),
+        vxi11_resource,
         hislip_resource: format!("TCPIP0::{}::hislip0,{}::INSTR", args.host, hislip_public),
     };
 
@@ -156,6 +189,27 @@ async fn main() -> Result<()> {
             .map_err(anyhow::Error::from)
     };
 
+    // The mapping advertises the *public* port, which is the proxy's when one
+    // is in front. Advertising the server's own port would route clients past
+    // the fault injector and quietly disarm every transport fault.
+    let portmap_fut = async move {
+        match portmap_listeners {
+            Some((tcp, udp)) => vxi11::portmap::run(
+                tcp,
+                udp,
+                vec![vxi11::portmap::Mapping {
+                    prog: vxi11::DEVICE_CORE_PROG,
+                    vers: vxi11::DEVICE_CORE_VERS,
+                    prot: vxi11::portmap::IPPROTO_TCP,
+                    port: u32::from(vxi11_public),
+                }],
+            )
+            .await
+            .map_err(anyhow::Error::from),
+            None => std::future::pending::<Result<()>>().await,
+        }
+    };
+
     let vxi11_proxy_fut = optional_proxy(vxi11_proxy, faults.clone(), Some(vxi11_tracker));
     let hislip_proxy_fut = optional_proxy(hislip_proxy, faults.clone(), None);
     let control_fut = control::run(control_listener, control);
@@ -168,6 +222,7 @@ async fn main() -> Result<()> {
         hislip_fut,
         vxi11_proxy_fut,
         hislip_proxy_fut,
+        portmap_fut,
         control_fut
     )?;
     Ok(())

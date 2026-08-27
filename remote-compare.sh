@@ -92,7 +92,7 @@ for backend in $BACKENDS; do
     say "building the $backend image on $HOST"
     if ! ssh -o BatchMode=yes "$HOST" \
         "cd $REMOTE_DIR && $CONTAINER build --build-arg BACKEND=$backend \
-         -f docker/Dockerfile -t testgear-$backend . 2>&1 | tail -30"
+         -f docker/Dockerfile -t localhost/testgear-$backend . 2>&1 | tail -30"
     then
         echo "!! the $backend image failed to build; continuing with the others"
         continue
@@ -100,7 +100,7 @@ for backend in $BACKENDS; do
 
     say "checking whether $backend loads"
     if ssh -o BatchMode=yes "$HOST" \
-        "cd $REMOTE_DIR && $CONTAINER run --rm testgear-$backend check"
+        "cd $REMOTE_DIR && $CONTAINER run --rm localhost/testgear-$backend check"
     then
         built+=("$backend")
     else
@@ -124,7 +124,7 @@ for backend in "${built[@]}"; do
     say "running the checks under $backend ($PROTOCOL)"
     ssh -o BatchMode=yes "$HOST" \
         "cd $REMOTE_DIR && mkdir -p reports && $CONTAINER run --rm \
-         -v $REMOTE_DIR/reports:/suite/reports:Z testgear-$backend \
+         -v $REMOTE_DIR/reports:/suite/reports:Z localhost/testgear-$backend \
          compare --protocol $PROTOCOL --json /suite/reports/$backend.json \
          ${EXTRA[*]:-}" 2>&1 | tail -40
 done
@@ -136,7 +136,7 @@ done
 say "running the checks under pyvisa-py, in the same container"
 ssh -o BatchMode=yes "$HOST" \
     "cd $REMOTE_DIR && $CONTAINER run --rm \
-     -v $REMOTE_DIR/reports:/suite/reports:Z testgear-${built[0]} \
+     -v $REMOTE_DIR/reports:/suite/reports:Z localhost/testgear-${built[0]} \
      python3 compare.py --backends py --protocol $PROTOCOL \
      --json /suite/reports/py.json ${EXTRA[*]:-}" 2>&1 | tail -20
 
