@@ -252,6 +252,16 @@ class MockServer:
             with contextlib.suppress(Exception):
                 self.set_hislip_faults()
 
+    def vxi11_calls(self) -> list[dict]:
+        """Every device_write / device_read the client sent, with its flags.
+
+        The operation flags and timeouts (VXI-11 B.5.3, B.5.4) are
+        requirements the client has to meet and are invisible from the API:
+        whether VI_ATTR_TERMCHAR_EN actually became termchrset on the wire can
+        only be seen here.
+        """
+        return self._command(cmd="vxi11_calls")["calls"]
+
     def set_vxi11_faults(self, **config) -> None:
         """Arm the RPC-level VXI-11 faults (error codes, maxRecvSize, ...)."""
         self._command(cmd="vxi11_faults", config=config)

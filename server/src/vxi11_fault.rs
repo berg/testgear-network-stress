@@ -23,6 +23,29 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+/// VXI-11 Figure B.16, the operation flags a client sends.
+pub const FLAG_WAITLOCK: u32 = 0x01;
+pub const FLAG_END: u32 = 0x08;
+pub const FLAG_TERMCHRSET: u32 = 0x80;
+
+/// One device_write or device_read call, as the client built it.
+///
+/// The flags and timeouts a client puts on the wire are requirements in their
+/// own right (B.5.3, B.5.4) and are invisible from the API: whether
+/// VI_ATTR_TERMCHAR_EN actually became termchrset, or a lock timeout actually
+/// became waitlock, can only be seen here.
+#[derive(Clone, Debug, Serialize)]
+pub struct Call {
+    pub proc: u32,
+    pub io_timeout: u32,
+    pub lock_timeout: u32,
+    pub flags: u32,
+    /// device_read only; None elsewhere.
+    pub term_char: Option<u8>,
+    /// device_read only: the size the client asked for.
+    pub request_size: Option<u32>,
+}
+
 /// Procedures worth naming (VXI-11 B.6).
 pub const CREATE_LINK: u32 = 10;
 pub const DEVICE_WRITE: u32 = 11;
@@ -69,6 +92,7 @@ impl Vxi11Faults {
 pub struct Tracker {
     calls: Mutex<HashMap<u32, u32>>,
     faults: Mutex<Vxi11Faults>,
+    seen: Mutex<Vec<Call>>,
 }
 
 impl Tracker {
@@ -87,6 +111,11 @@ impl Tracker {
     pub fn clear(&self) {
         *self.faults.lock().unwrap() = Vxi11Faults::default();
         self.calls.lock().unwrap().clear();
+        self.seen.lock().unwrap().clear();
+    }
+
+    pub fn snapshot(&self) -> Vec<Call> {
+        self.seen.lock().unwrap().clone()
     }
 
     /// Note the procedure of every call going to the server.
@@ -99,8 +128,12 @@ impl Tracker {
             return;
         };
         for (_, body_at, body_len) in spans {
-            if let Some((xid, proc)) = parse_call(&buf[body_at..body_at + body_len]) {
+            let record = &buf[body_at..body_at + body_len];
+            if let Some((xid, proc)) = parse_call(record) {
                 self.calls.lock().unwrap().insert(xid, proc);
+                if let Some(call) = parse_args(record, proc) {
+                    self.seen.lock().unwrap().push(call);
+                }
             }
         }
     }
@@ -238,6 +271,40 @@ fn parse_call(record: &[u8]) -> Option<(u32, u32)> {
     }
     let proc = read_u32(record, 20)?;
     Some((xid, proc))
+}
+
+/// The argument block of a device_write / device_read call.
+///
+/// Offsets follow RFC 5531: xid, msg_type, rpcvers, prog, vers, proc, then the
+/// credential and verifier, each a flavour and a length. Both are AUTH_NONE
+/// with empty bodies for VXI-11, which puts the arguments at offset 40. A call
+/// whose auth carries a body is left alone rather than mis-parsed.
+fn parse_args(record: &[u8], proc: u32) -> Option<Call> {
+    if read_u32(record, 28)? != 0 || read_u32(record, 36)? != 0 {
+        return None; // non-empty credential or verifier
+    }
+    let args = 40;
+    match proc {
+        DEVICE_WRITE => Some(Call {
+            proc,
+            // lid, io_timeout, lock_timeout, flags, data
+            io_timeout: read_u32(record, args + 4)?,
+            lock_timeout: read_u32(record, args + 8)?,
+            flags: read_u32(record, args + 12)?,
+            term_char: None,
+            request_size: None,
+        }),
+        DEVICE_READ => Some(Call {
+            proc,
+            // lid, requestSize, io_timeout, lock_timeout, flags, termChar
+            request_size: Some(read_u32(record, args + 4)?),
+            io_timeout: read_u32(record, args + 8)?,
+            lock_timeout: read_u32(record, args + 12)?,
+            flags: read_u32(record, args + 16)?,
+            term_char: Some(read_u32(record, args + 20)? as u8),
+        }),
+        _ => None,
+    }
 }
 
 fn read_u32(buf: &[u8], at: usize) -> Option<u32> {

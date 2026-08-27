@@ -61,6 +61,8 @@ pub enum Request {
     HislipFaults { config: HislipFaults },
     /// Every HiSLIP message header seen, in both directions.
     HislipMessages,
+    /// Every device_write / device_read call, with its flags and timeouts.
+    Vxi11Calls,
     /// Ping, so the harness can wait for the server to come up.
     Ping,
 }
@@ -72,6 +74,7 @@ pub enum Response {
     Faults(FaultConfig),
     Events { events: Vec<Event> },
     Hislip { messages: Vec<crate::hislip_fault::Seen> },
+    Vxi11 { calls: Vec<crate::vxi11_fault::Call> },
     Ok { ok: bool },
     Error { error: String },
 }
@@ -162,6 +165,9 @@ async fn handle(request: Request, ctl: &Control) -> Response {
         }
         Request::HislipMessages => Response::Hislip {
             messages: ctl.hislip.snapshot(),
+        },
+        Request::Vxi11Calls => Response::Vxi11 {
+            calls: ctl.vxi11.snapshot(),
         },
         Request::Observed => Response::Events {
             events: ctl.observed.snapshot(),

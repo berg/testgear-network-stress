@@ -85,6 +85,9 @@ for proto in "${PROTOCOLS[@]}"; do
     run 06_terminate.py    "$proto" -n 15 "$@"
     run 07_clear.py        "$proto" -n 40 "$@"
     run 09_remote_local.py "$proto" "$@"
+    run 10_lock_semantics.py "$proto" "$@"
+    run 12_session_lifecycle.py "$proto" "$@"
+    run 13_events.py       "$proto" "$@"
     run conformance.py     "$proto" "$@"
     run 08_soak.py         "$proto" --duration "$SOAK" --srq-thread "$@"
 done
@@ -93,6 +96,10 @@ done
 for proto in "${PROTOCOLS[@]}"; do
     if [[ "$proto" == "vxi11" ]]; then
         run vxi11_conformance.py vxi11 "$@"
+        run 14_vxi11_flags.py    vxi11 "$@"
+    fi
+    if [[ "$proto" == "hislip" ]]; then
+        run 11_hislip_messages.py hislip "$@"
     fi
 done
 

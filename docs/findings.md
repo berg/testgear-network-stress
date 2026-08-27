@@ -192,6 +192,35 @@ sessions decide whether they are sharing a lock, so a client that truncated
 instead would let two sessions with different keys share a lock neither asked to
 share.
 
+### The resource template is largely unimplemented (VPP-4.3 3.2, 3.3, 3.4, 3.7)
+
+**Status:** open, and **not yet confirmed against a vendor** -- the build host
+went off DNS before the comparison could run. Every entry cites a clause, which
+is the property that has so far predicted survival, but predicted is not
+confirmed. Treat this section as a hypothesis list.
+
+Both transports behave identically, which is itself informative: these are
+template-level rules, not transport ones.
+
+| clause | requirement | pyvisa-py |
+| --- | --- | --- |
+| 3.2.3 | `VI_ATTR_RSRC_SPEC_VERSION` is `00700200h` | not readable |
+| 3.2.5 / 3.2.6 | `VI_ATTR_MAX_QUEUE_LENGTH` is writeable until the first `viEnableEvent`, read-only after | unsupported entirely |
+| 3.3.2 | `viClose(VI_NULL)` returns `VI_WARN_NULL_OBJECT` | `VI_ERROR_INV_OBJECT` |
+| 3.4.2 | a state the resource cannot honour returns `VI_ERROR_NSUP_ATTR_STATE` | a termination character of `0x1FF` is accepted |
+| 3.7.6 | `viEnableEvent(VI_HNDLR)` with no handler returns `VI_ERROR_HNDLR_NINSTALLED` | succeeds |
+| 3.7.13 | `VI_SUSPEND_HNDLR | VI_HNDLR` returns `VI_ERROR_INV_MECH` | accepted |
+
+The two event ones are the least cosmetic. Enabling the callback mechanism with
+no handler leaves a session enabled for a delivery route that cannot deliver, so
+events are dropped and nothing says so; and accepting both callback modes at
+once leaves the caller unable to tell whether delivery is immediate or deferred.
+
+What pyvisa-py gets right here is worth recording too, because it is the rule
+most likely to be got wrong: an event queued before its type was disabled is
+still dequeued (3.7.21, 3.7.23), rather than being lost by an implementation
+that treats *disabled* as *empty*.
+
 ### viFlush raises NotImplementedError out of a VXI-11 session
 
 **Status:** open. Both trees.
