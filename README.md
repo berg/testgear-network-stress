@@ -166,6 +166,26 @@ Checks cite the clause they rest on: VPP-4.3 (*The VISA Library*), VXI-11 Rev
 copyright and are **not** included here; a citation names the clause and you
 read it in your own copy.
 
+Citations are not decoration. Point `tools/spec_rules.py` at your copies and it
+extracts every normative statement, cross-references them against the `rule=`
+annotations on the checks, and reports what is covered:
+
+```bash
+./.venv/bin/python tools/spec_rules.py --specs ~/specs --out docs/spec-coverage.md
+```
+
+A check citing no clause counts for nothing in that report, which is
+deliberate. When three implementations were first compared, every check they
+disagreed about that cited **no** clause turned out to be the check's own
+fault, and every check that cited one survived. Seven for seven. So an uncited
+check is treated as suspect until a clause is found for it -- not because a
+citation makes a check correct, but because writing one forces the question
+"what says so?", which is exactly what a check written from one implementation's
+behaviour cannot answer.
+
+[`docs/spec-coverage.md`](docs/spec-coverage.md) is the generated report and
+[`docs/spec-gaps.md`](docs/spec-gaps.md) is the hand-written queue.
+
 ## Licence
 
 GPL-3.0-or-later. Not a style choice: `server/src/{hislip,vxi11,frontend}/` and

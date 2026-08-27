@@ -1,37 +1,51 @@
 # Spec gaps
 
-**Current state:** 126 of 854 normative statements are cited by a check. Of the
-remainder, 159 are client-testable and untouched -- that is the real queue, and
-`tools/spec_rules.py` now prints the triage that produces the number. The other
-1,000-odd words of the raw count are requirements binding other interfaces, the
-instrument server, or nothing observable.
+**Current state:** 139 of 854 normative statements are cited by a check, up
+from 33 when this suite was first pointed at the specs. Of the remainder, 147
+are client-testable and untouched -- that is the real queue, and
+`tools/spec_rules.py` prints the triage that produces the number. The rest bind
+other interfaces, bind the instrument server, or state no single observable
+behaviour.
 
-Done since this document was first written: VPP-4.3 3.6 (locks), 3.2-3.4
-(resource template), 3.7 (events), 5.1 (required attributes); VXI-11 B.5.3 and
-B.5.4 (operation flags and timeouts), B.6.77; IVI-6.1 3.1.2 (HiSLIP client
-requirements, which needed a message-level injector built first).
+## Done
 
-
-Hand-written companion to [`spec-coverage.md`](spec-coverage.md), which is
-generated and overwritten by `tools/spec_rules.py`. Nothing here is mechanical,
-so it lives in its own file.
-
-The 854 raw statements overstate what is owed. Triaged:
-
-| bucket | count | why |
+| area | clauses | file |
 | --- | --- | --- |
-| already cited by a check | 68 | |
-| OBSERVATION / RECOMMENDATION / PERMISSION | 254 | not requirements |
-| other interface (GPIB, USB, PXI, serial, VXI backplane) | 71 | no TCPIP client can be held to them |
-| **client-testable and uncovered** | **~120** | the real queue |
-| unclassified | ~397 | mostly server-side, definitional, or about API surface this suite does not exercise |
+| Lock semantics | VPP-4.3 3.6.10-3.6.32 | `checks/10_lock_semantics.py` |
+| HiSLIP client requirements | IVI-6.1 2.3, 2.7, 3.1.2 | `checks/11_hislip_messages.py` |
+| Resource template | VPP-4.3 3.2, 3.3, 3.4 | `checks/12_session_lifecycle.py` |
+| Event handling | VPP-4.3 3.7 | `checks/13_events.py` |
+| VXI-11 operation flags | VXI-11 B.5.3, B.5.4, B.6.14, B.6.22 | `checks/14_vxi11_flags.py` |
+| Required attributes | VPP-4.3 5.1.11-5.1.54 | `checks/15_required_attributes.py` |
+| Required operations, read statuses | VPP-4.3 5.1.72, 6.1.4, 6.1.5 | `checks/16_operations.py` |
+| Resource name parsing | VPP-4.3 4.3.4-4.3.20, 6.2.3 | `checks/17_resource_names.py` |
 
-The unclassified bulk is not dismissed, it is unsorted; the filter keys on
-operation and attribute names, so a rule phrased purely in prose falls through.
-That is the next sweep.
+Building the HiSLIP message-level injector was the enabling piece: IVI-6.1 was
+0 of 103 before it, because none of section 3.1.2 is visible through the VISA
+API.
 
-What follows is the queue in priority order. Priority is *finding density* --
-where three implementations are most likely to differ -- not spec order.
+## Next, in rough order of value
+
+1. **Confirm the pending findings against a vendor.** Everything found since
+   the build host went off DNS is a hypothesis. The rule this suite learned the
+   hard way is that a check only pyvisa-py fails is not yet a claim about
+   pyvisa-py -- and the one property that has predicted survival is whether the
+   check cites a clause, which these all do.
+2. **IVI-6.1 3.1.2 rules 3 and 4** -- clearing validated buffers when the
+   client sends, and the Interrupted / AsyncInterrupted ordering. Both need the
+   injector to *originate* messages rather than only rewrite them.
+3. **IVI-6.1 3.2.2**, overlap mode client requirements. Untouched, and the
+   AsyncStatusQuery MessageID rule is the same shape as the rules already
+   covered for synchronised mode.
+4. **VPP-4.3 6.3**, the remaining operation definitions -- 49 uncovered, the
+   largest single block left.
+5. **A server that chunks its replies.** Rule 2 of 3.1.2 is unreachable while
+   the mock answers every read with a single DataEND, however large.
+
+## Original assessment
+
+Kept because the reasoning still holds and the priorities it set turned out to
+be right.
 
 ## 1. Lock semantics (VPP-4.3 3.6.x) &mdash; **done**, see `checks/10_lock_semantics.py`
 
