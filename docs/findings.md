@@ -157,6 +157,41 @@ client's to send, and any server that does wait for it is entitled to.
 Reproduce: `checks/03_srq.py --protocol vxi11` takes about 60s for 30 service
 requests and about 2s for the same 30 over HiSLIP.
 
+### Lock nesting is not implemented (VPP-4.3 3.6.28 / 3.6.29 / 3.6.31 / 3.6.32)
+
+**Status:** open. Confirmed against both vendors.
+
+VPP-4.3 has VISA keep a lock count per session, and defines completion codes so
+a caller can tell a full release from a partial one:
+
+| clause | requirement | pyvisa-py | NI-VISA | R&S VISA |
+| --- | --- | --- | --- | --- |
+| 3.6.28 | a nested exclusive lock returns `VI_SUCCESS_NESTED_EXCLUSIVE` | plain `VI_SUCCESS` (HiSLIP) / `VI_ERROR_TSK_TIMEOUT` (VXI-11) | correct | correct |
+| 3.6.32 | an unlock leaving a lock held returns `VI_SUCCESS_NESTED_EXCLUSIVE` | plain `VI_SUCCESS` | &mdash; | &mdash; |
+| 3.6.29 | a nested shared lock returns `VI_SUCCESS_NESTED_SHARED` | plain `VI_SUCCESS` | &mdash; | &mdash; |
+| 3.6.31 | a shared re-lock with a different key returns `VI_ERROR_INV_ACCESS_KEY` | granted | &mdash; | &mdash; |
+
+The VXI-11 case is the worst of them. VXI-11 locks are non-nesting on the wire
+(RULE B.6.72), so a conforming client keeps the count itself; pyvisa-py forwards
+the second `device_lock` to a server already holding that lock *for this very
+session*, and the session waits out its own timeout against itself. NI and R&S
+both answer `VI_SUCCESS_NESTED_EXCLUSIVE` immediately.
+
+The good news, and worth stating because it bounds the severity: the *resource*
+does stay held. A caller nesting a locked region inside another does not give
+the instrument up at the inner boundary. What is missing is the reporting, and
+on VXI-11 the ability to nest at all.
+
+### A shared-lock key of 256 characters or more is accepted (VPP-4.3 3.6.17)
+
+**Status:** open, HiSLIP.
+
+3.6.17 makes a `requestedKey` of 256 characters or more an error. A 300-character
+key is accepted and returned intact. Accepting it is not harmless: keys are how
+sessions decide whether they are sharing a lock, so a client that truncated
+instead would let two sessions with different keys share a lock neither asked to
+share.
+
 ### viFlush raises NotImplementedError out of a VXI-11 session
 
 **Status:** open. Both trees.

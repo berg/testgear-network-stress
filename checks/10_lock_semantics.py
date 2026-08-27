@@ -63,37 +63,147 @@ def lock_state(inst) -> tuple:
 # ---------------------------------------------------------------------------
 # Lock counting and nesting
 # ---------------------------------------------------------------------------
-@check("an exclusive lock taken twice needs two unlocks", rule="VPP-4.3 3.6.10")
+@check("a nested exclusive lock reports VI_SUCCESS_NESTED_EXCLUSIVE",
+       rule="VPP-4.3 3.6.28")
 def check_exclusive_nesting():
-    """3.6.10: a successful exclusive lock increments the session's count.
+    """3.6.28: locking exclusive again with a non-zero count returns
+    VI_SUCCESS_NESTED_EXCLUSIVE -- a completion code, not an error.
 
-    The count is the point. If it is not kept, the first unlock releases the
-    resource and a second session can take it while the first still believes
-    it holds one -- silent, and the kind of thing that only bites under
-    contention.
+    VXI-11 locks are non-nesting on the wire (RULE B.6.72), so a conforming
+    client has to keep the count itself (3.6.10) rather than send a second
+    device_lock. Forwarding it makes the session wait for a lock it is already
+    holding, which is a deadlock against itself.
+    """
+    with open_inst() as inst:
+        lib, sess = inst.visalib, inst.session
+        _, first = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
+        assert first == StatusCode.success, f"the first lock returned {first!r}"
+        _, second = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
+
+        # Unwind whatever was actually taken before asserting.
+        visa.status(lib.unlock, sess)
+        if second in (StatusCode.success, StatusCode.success_nested_exclusive):
+            visa.status(lib.unlock, sess)
+
+        assert second != StatusCode.error_timeout, (
+            "locking exclusive twice on one session timed out: the second "
+            "request went to the server, which is already holding the lock for "
+            "this very session. VXI-11 locks do not nest on the wire "
+            "(RULE B.6.72), so the count belongs in the client (RULE 3.6.10)"
+        )
+        assert second == StatusCode.success_nested_exclusive, (
+            f"expected VI_SUCCESS_NESTED_EXCLUSIVE, got {second!r}"
+        )
+
+
+@check("the unlock that leaves a lock still held reports the nesting",
+       rule="VPP-4.3 3.6.32")
+def check_unlock_reports_nesting():
+    """3.6.32: unlocking while the exclusive count is still non-zero returns
+    VI_SUCCESS_NESTED_EXCLUSIVE, so the caller can tell "released" from
+    "released one of several"."""
+    with open_inst() as inst:
+        lib, sess = inst.visalib, inst.session
+        _, first = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
+        _, second = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
+        if second not in (StatusCode.success, StatusCode.success_nested_exclusive):
+            visa.status(lib.unlock, sess)
+            raise Skip(f"this implementation does not nest exclusive locks ({second!r})")
+
+        inner = visa.status(lib.unlock, sess)
+        outer = visa.status(lib.unlock, sess)
+        assert inner == StatusCode.success_nested_exclusive, (
+            f"the unlock leaving one lock still held returned {inner!r}, so a "
+            f"caller cannot tell it from a full release"
+        )
+        assert outer == StatusCode.success, (
+            f"the final unlock returned {outer!r}, expected VI_SUCCESS"
+        )
+
+
+@check("a nested shared lock reports VI_SUCCESS_NESTED_SHARED",
+       rule="VPP-4.3 3.6.29")
+def check_shared_nesting():
+    """3.6.29, the shared-lock counterpart of 3.6.28."""
+    if not shared_locks_supported():
+        raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")
+    with open_inst() as inst:
+        lib, sess = inst.visalib, inst.session
+        _, first = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "nest")
+        if first == StatusCode.error_invalid_protocol:
+            raise Skip(f"this implementation refuses shared locks here ({first!r})")
+        assert first == StatusCode.success, f"the first shared lock returned {first!r}"
+        _, second = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "nest")
+
+        visa.status(lib.unlock, sess)
+        if second in (StatusCode.success, StatusCode.success_nested_shared):
+            visa.status(lib.unlock, sess)
+
+        assert second == StatusCode.success_nested_shared, (
+            f"expected VI_SUCCESS_NESTED_SHARED, got {second!r}"
+        )
+
+
+@check("one unlock of two does not release the resource", rule="VPP-4.3 3.6.10")
+def check_nesting_holds_resource():
+    """The consequence, rather than the completion code.
+
+    3.6.10 keeps a count per session; the count exists so that unlocking once
+    after locking twice leaves the resource held. If it does not, a caller
+    that wraps a locked region inside another locked region releases the
+    instrument at the inner boundary while still believing it holds it -- and
+    nothing says so. That is a silent correctness failure under contention,
+    which is the only place it can happen and the worst place to find it.
     """
     with open_inst() as a, open_inst() as b:
         lib, sess = a.visalib, a.session
-        for i in range(2):
-            _, st = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
-            assert st == StatusCode.success, f"lock {i + 1} returned {st!r}"
+        _, first = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
+        assert first == StatusCode.success, f"the first lock returned {first!r}"
+        _, second = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
+        if second not in (StatusCode.success, StatusCode.success_nested_exclusive):
+            visa.status(lib.unlock, sess)
+            raise Skip(f"this implementation does not nest exclusive locks ({second!r})")
 
-        st = visa.status(lib.unlock, sess)
-        assert st == StatusCode.success, f"the first unlock returned {st!r}"
+        visa.status(lib.unlock, sess)  # one of two
 
-        # One unlock of two: the resource must still be locked.
         _, contend = visa.call(
-            b.visalib.lock, b.session, constants.Lock.exclusive, 200, None
+            b.visalib.lock, b.session, constants.Lock.exclusive, 300, None
         )
-        still_held = contend != StatusCode.success
-        if contend == StatusCode.success:
+        released_early = contend == StatusCode.success
+        if released_early:
             visa.status(b.visalib.unlock, b.session)
+        visa.status(lib.unlock, sess)
+
+        assert not released_early, (
+            "after two locks and one unlock another session acquired the "
+            "resource, so the lock count is not being kept: a caller nesting a "
+            "locked region inside another gives the instrument up at the inner "
+            "boundary while still believing it holds it"
+        )
+
+
+@check("a shared re-lock with the wrong key is refused", rule="VPP-4.3 3.6.31")
+def check_shared_wrong_key():
+    """3.6.31: re-locking shared with a key that is not the resource's access
+    key returns VI_ERROR_INV_ACCESS_KEY -- not a second lock, and not silence.
+    """
+    if not shared_locks_supported():
+        raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")
+    with open_inst() as inst:
+        lib, sess = inst.visalib, inst.session
+        _, first = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "right-key")
+        if first == StatusCode.error_invalid_protocol:
+            raise Skip(f"this implementation refuses shared locks here ({first!r})")
+        assert first == StatusCode.success, f"the first shared lock returned {first!r}"
+        _, second = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "wrong-key")
 
         visa.status(lib.unlock, sess)
-        assert still_held, (
-            "after two locks and one unlock the resource was already free, so "
-            "the lock count is not being kept: a session that locks twice and "
-            "unlocks once still believes it holds the resource"
+        if second in (StatusCode.success, StatusCode.success_nested_shared):
+            visa.status(lib.unlock, sess)
+
+        assert second == StatusCode.error_invalid_access_key, (
+            f"re-locking shared with a different key returned {second!r}, "
+            f"expected VI_ERROR_INV_ACCESS_KEY"
         )
 
 
