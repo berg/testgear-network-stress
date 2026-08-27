@@ -192,6 +192,42 @@ sessions decide whether they are sharing a lock, so a client that truncated
 instead would let two sessions with different keys share a lock neither asked to
 share.
 
+### The resource class suffix is matched case-sensitively (VPP-4.3 4.3.17)
+
+**Status:** open, vendor confirmation pending. Both transports.
+
+4.3.17 requires `viOpen` to use a case-insensitive compare when matching
+resource names, and admits no exceptions. Varying each component separately
+isolates the one that does not:
+
+| component varied | result |
+| --- | --- |
+| `tcpip0::` interface prefix | accepted |
+| `hislip0` / `inst0` device name | accepted |
+| `::instr` resource class suffix | **`VI_ERROR_INV_RSRC_NAME`** |
+
+So `TCPIP0::10.0.0.5::hislip0::INSTR` opens and
+`TCPIP0::10.0.0.5::hislip0::instr` does not, and the error names the whole
+string rather than the one component at fault.
+
+This is the most likely of these findings to be hit by an actual user. A
+resource name typically arrives from a configuration file or a copy-paste, its
+capitalisation comes from a human, and the failure gives no hint that case is
+the problem. Two of the three components already compare case-insensitively,
+which suggests a regex requiring the suffix uppercase rather than a deliberate
+choice.
+
+### viSetBuf raises instead of reporting (VPP-4.3 6.2.3)
+
+**Status:** open, vendor confirmation pending. Both transports.
+
+6.2.3 and 6.2.4 say that a TCPIP INSTR resource which cannot set the I/O buffer
+size answers `VI_ERROR_NSUP_OPER`. `viSetBuf` raises a Python exception
+instead -- the same contract break as `viFlush`, and now the third operation
+found doing it. Worth treating as one defect with three instances rather than
+three defects: the pattern is an unimplemented operation raising rather than
+returning.
+
 ### Required INSTR attributes are missing (VPP-4.3 5.1.11, 5.1.12, 5.1.17)
 
 **Status:** open, vendor confirmation pending.

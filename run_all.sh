@@ -90,6 +90,7 @@ for proto in "${PROTOCOLS[@]}"; do
     run 13_events.py       "$proto" "$@"
     run 15_required_attributes.py "$proto" "$@"
     run 16_operations.py   "$proto" "$@"
+    run 17_resource_names.py "$proto" "$@"
     run conformance.py     "$proto" "$@"
     run 08_soak.py         "$proto" --duration "$SOAK" --srq-thread "$@"
 done
