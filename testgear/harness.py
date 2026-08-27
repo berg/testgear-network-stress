@@ -126,15 +126,25 @@ class Stats:
         return [f"{k}: {v}" for k, v in self.context.items()]
 
     # -- recording ---------------------------------------------------------
-    def check(self, condition: bool, message: str, rule: str = "") -> bool:
+    def check(
+        self, condition: bool, message: str, rule: str = "", detail: str = ""
+    ) -> bool:
+        """Record one check.
+
+        `message` names the check and must not vary with the outcome: the
+        matrix lines columns up by name, so a name that changes when the check
+        fails appears as a *missing* result rather than a failing one. Put the
+        observed value in `detail`, which is reported either way.
+        """
         with self._lock:
+            shown = f"{message} ({detail})" if detail else message
             if condition:
                 self.ok += 1
-                self.results.append(Result(message, PASS, rule=rule))
+                self.results.append(Result(message, PASS, detail=detail, rule=rule))
                 if self.verbose:
-                    print(f"  ok   {message}")
+                    print(f"  ok   {shown}")
             else:
-                cited = f"{message} [{rule}]" if rule else message
+                cited = f"{shown} [{rule}]" if rule else shown
                 self.failures.append(cited)
                 self.results.append(Result(message, FAIL, detail=cited, rule=rule))
                 print(f"  FAIL {cited}")

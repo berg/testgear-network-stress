@@ -48,7 +48,7 @@ def main() -> int:
                 StatusCode.error_nonsupported_operation,
                 visa.NOT_IMPLEMENTED,
             ):
-                stats.skip(f"viTerminate is not implemented here ({st!r})")
+                stats.skip("viTerminate is implemented", f"not implemented here ({st!r})")
                 stats.write_outputs(args)
                 return stats.finish()
 

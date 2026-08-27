@@ -136,9 +136,9 @@ def main() -> int:
                         StatusCode.error_nonsupported_operation,
                         StatusCode.error_invalid_protocol,
                     ),
-                    f"a non-default trigger protocol is refused cleanly, "
-                    f"got {st!r}",
+                    "a non-default trigger protocol is refused cleanly",
                     rule="VPP-4.3 6.1.7",
+                    detail=f"got {st!r}",
                 )
 
             # -- clear ------------------------------------------------------
@@ -285,8 +285,9 @@ def main() -> int:
             # implemented.
             stats.check(
                 st in (StatusCode.success, StatusCode.error_nonsupported_operation),
-                f"viFlush reports a VISA status, got {st!r}",
+                "viFlush reports a VISA status",
                 rule="VPP-4.3 3.2.4",
+                detail=f"got {st!r}",
             )
 
             # -- attributes ---------------------------------------------------
@@ -295,17 +296,22 @@ def main() -> int:
                 attributes += HISLIP_ATTRIBUTES
             for name, expected in attributes:
                 value, st = visa.call(lib.get_attribute, sess, getattr(RA, name))
+                # One name for both outcomes. A check whose *name* changes
+                # when it fails cannot be lined up against the same check in
+                # another implementation's column, and the matrix then shows
+                # the failure as "did not run" -- which reads as the opposite
+                # of what happened.
                 if st != StatusCode.success:
                     # RULE 5.1.12 requires these of any message-based INSTR
                     # resource, TCPIP named explicitly, so an unreadable one
                     # is a cited failure rather than an observation.
-                    stats.error(
-                        f"{name} is not readable ({st!r})", rule="VPP-4.3 5.1.12"
-                    )
+                    ok, detail = False, f"not readable ({st!r})"
                 elif expected is None:
-                    stats.check(value is not None, f"{name} = {value!r}")
+                    ok, detail = value is not None, f"= {value!r}"
                 else:
-                    stats.check(value == expected, f"{name} = {value!r}")
+                    ok, detail = value == expected, f"= {value!r} (wanted {expected!r})"
+                stats.check(ok, f"{name} is readable", rule="VPP-4.3 5.1.12",
+                            detail=detail)
 
             # VI_ATTR_INTF_INST_NAME is a human-readable string whose exact
             # wording is the backend's own; note it rather than assert it, or

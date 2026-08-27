@@ -35,18 +35,38 @@ from testgear import backends, report  # noqa: E402
 HERE = Path(__file__).resolve().parent
 CHECKS = HERE / "checks"
 
-#: The scripts worth comparing. The soak is left out on purpose: it is a
-#: randomised workload whose value is duration, and its single summary check
-#: says nothing useful in a matrix.
+#: The scripts worth comparing: everything the suite has, in run order.
+#:
+#: This list used to name five scripts, which quietly decided what the
+#: published matrix could ever show -- the spec-conformance scripts added
+#: later were absent, and they are where nearly every finding lives. A
+#: comparison that silently covers a third of the suite is worse than no
+#: comparison, because it reads as coverage.
+#:
+#: The soak is still left out on purpose: it is a randomised workload whose
+#: value is duration, and its single summary check says nothing in a matrix.
 DEFAULT_SCRIPTS = (
     "01_smoke.py",
     "02_io.py",
-    "conformance.py",
+    "03_srq.py",
+    "04_concurrency.py",
     "05_lock.py",
+    "06_terminate.py",
+    "07_clear.py",
     "09_remote_local.py",
+    "10_lock_semantics.py",
+    "12_session_lifecycle.py",
+    "13_events.py",
+    "15_required_attributes.py",
+    "16_operations.py",
+    "17_resource_names.py",
+    "conformance.py",
 )
 
-VXI11_ONLY = ("vxi11_conformance.py",)
+#: Scripts that read one transport's wire format directly, so they only mean
+#: anything on that transport.
+VXI11_ONLY = ("vxi11_conformance.py", "14_vxi11_flags.py")
+HISLIP_ONLY = ("11_hislip_messages.py",)
 
 
 def run_one(
@@ -149,8 +169,8 @@ def main() -> int:
     scripts = list(
         args.scripts.split(",") if args.scripts else DEFAULT_SCRIPTS
     )
-    if args.protocol == "vxi11" and not args.scripts:
-        scripts += list(VXI11_ONLY)
+    if not args.scripts:
+        scripts += list(VXI11_ONLY if args.protocol == "vxi11" else HISLIP_ONLY)
 
     # Two comparison modes. Several trees of one backend answers "did my branch
     # change anything?"; several backends answers "is pyvisa-py the odd one
