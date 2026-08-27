@@ -10,3 +10,4 @@ server/target/
 vendor/*
 !vendor/README.md
 reports/
+reports-*/
