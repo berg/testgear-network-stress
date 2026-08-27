@@ -142,10 +142,18 @@ def main() -> int:
                         st == StatusCode.success, f"REN {mode.name} accepted ({st!r})"
                     )
                 else:
+                    # Every implementation refuses these -- VXI-11 has no
+                    # RPC for driving REN without addressing -- but they
+                    # disagree about how to say so: pyvisa-py answers
+                    # VI_ERROR_NSUP_OPER, NI and R&S both answer
+                    # VI_ERROR_INVALID_MODE. Both are defensible refusals, so
+                    # the check is that it *is* refused.
                     stats.check(
-                        st == StatusCode.error_nonsupported_operation,
-                        f"REN {mode.name} is refused as unsupported over VXI-11 "
-                        f"({st!r})",
+                        st in (
+                            StatusCode.error_nonsupported_operation,
+                            StatusCode.error_invalid_mode,
+                        ),
+                        f"REN {mode.name} is refused over VXI-11, got {st!r}",
                     )
 
             # -- 2. calibrate the oracle -------------------------------------

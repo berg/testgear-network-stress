@@ -128,7 +128,17 @@ def main() -> int:
             key, st = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
             stats.check(st == StatusCode.success, f"exclusive lock {st!r}",
                         rule="VPP-4.3 3.6.2.1")
-            stats.check(key == "", "an exclusive lock has an empty key")
+            # VPP-4.3 leaves accessKey unused for an exclusive lock, so an
+            # empty one is right -- but NI and R&S both hand back a generated
+            # key regardless. Nothing depends on it being empty, so this is
+            # recorded rather than failed.
+            if key in ("", None, b""):
+                stats.check(True, "an exclusive lock has an empty access key")
+            else:
+                stats.note(
+                    f"this implementation returns an access key for an "
+                    f"exclusive lock, where VPP-4.3 leaves it unused: {key!r}"
+                )
             # Read through visa.call: a backend that does not implement this
             # attribute at all should be reported as a failed check, not kill
             # the run. Upstream pyvisa-py raises VI_ERROR_NSUP_ATTR here on
@@ -206,10 +216,18 @@ def main() -> int:
                 if mode in expected_ok:
                     stats.check(st == StatusCode.success, f"REN {mode.name} -> {st!r}")
                 else:
+                    # Every implementation refuses these -- VXI-11 has no
+                    # RPC for driving REN without addressing -- but they
+                    # disagree about how to say so: pyvisa-py answers
+                    # VI_ERROR_NSUP_OPER, NI and R&S both answer
+                    # VI_ERROR_INVALID_MODE. Both are defensible refusals, so
+                    # the check is that it *is* refused.
                     stats.check(
-                        st == StatusCode.error_nonsupported_operation,
-                        f"REN {mode.name} is refused as unsupported over "
-                        f"VXI-11, got {st!r}",
+                        st in (
+                            StatusCode.error_nonsupported_operation,
+                            StatusCode.error_invalid_mode,
+                        ),
+                        f"REN {mode.name} is refused over VXI-11, got {st!r}",
                     )
             # The enum ends on a deassert, which would leave a real instrument
             # in local mode. Put it back under remote control.

@@ -7,6 +7,17 @@ first is a bug report against a client.
 
 Reproduce anything here with the mock server; none of it needs a bench.
 
+**Three implementations now.** Entries below carry NI-VISA 26.5.0 and R&S VISA
+5.12.9 results alongside pyvisa-py, all three run from the same container on the
+same kernel against the same mock (see `remote-compare.sh`). That upgrades most
+of these from "disagrees with the spec" to "disagrees with a shipping
+implementation", and it demoted one entry to a non-finding -- which is the
+point of doing it.
+
+One calibration result worth stating plainly: across 115 VXI-11 checks there is
+**no case where pyvisa-py fails and both vendors pass**. Where pyvisa-py is
+wrong it usually has company.
+
 ---
 
 ## Client-side
@@ -38,6 +49,18 @@ Two things are wrong with what comes back:
 The 1:1 scaling on top of a fixed floor is the signature of two deadlines in
 series rather than one deadline applied to the operation. HiSLIP does not show
 it: the same injection over HiSLIP raises promptly.
+
+Against the same injection with a 2000 ms timeout:
+
+| implementation | behaviour |
+| --- | --- |
+| NI-VISA 26.5.0 | `VI_ERROR_TSK_TIMEOUT` in 2001 ms |
+| PyVISA-py | `VI_ERROR_IO`, ~11 s late |
+| R&S VISA 5.12.9 | never returns at all (30 s watchdog) |
+
+NI is exactly right: the correct error, at the configured deadline, to the
+millisecond. So both halves of this -- the error code and the timing -- are
+achievable, and neither is a consequence of the fault being unusual.
 
 Reproduce:
 
@@ -79,12 +102,21 @@ not slow, it does not time out, and the session timeout does not apply --
 `viWrite` simply never returns. The suite's watchdog reports it after 20s;
 without one it hangs the run.
 
-A server reporting zero is out of spec, so this needs a hostile or broken
-server to reach. That is still worth fixing: zero is exactly what a
+| implementation | behaviour |
+| --- | --- |
+| NI-VISA 26.5.0 | survives, and the query returns its data |
+| PyVISA-py | never returns |
+| R&S VISA 5.12.9 | never returns |
+
+NI proves this is defensible, which is the argument that matters: it is not an
+inherent consequence of a server sending nonsense, it is a missing bounds
+check. A server reporting zero is out of spec, but zero is exactly what a
 half-initialised field or a byte-order slip produces, the client is the side
 that can defend itself, and an unkillable loop inside a library call is much
-worse than an error. A bounds check on the value from `create_link` -- reject
-it, or fall back to the 1024 floor the rule guarantees -- is the whole fix.
+worse than an error. Rejecting the value, or falling back to the 1024 floor
+B.6.3 guarantees, is the whole fix.
+
+R&S sharing the bug is worth knowing but is not a defence.
 
 The abandoned thread keeps running afterwards and keeps driving the server,
 which is its own hazard for anything sharing that server.
@@ -210,8 +242,15 @@ Both looked like gaps in pyvisa-py's VXI-11 session and are neither.
 VXI-11 carries only *addressed* remote/local operations: `device_remote`
 (B.6.13) asserts REN and addresses the device, `device_local` (B.6.14) sends
 GTL. There is no RPC for driving the REN line on its own, so refusing
-`VI_GPIB_REN_ASSERT` and friends with `VI_ERROR_NSUP_OPER` is conforming.
-Requiring success from every `RENLineOperation` was the check being wrong.
+`VI_GPIB_REN_ASSERT` and friends is conforming. Requiring success from every
+`RENLineOperation` was the check being wrong.
+
+The vendor run confirmed the substance and corrected the detail: all three
+implementations refuse the unaddressed modes, and they disagree only about how
+to say so -- pyvisa-py answers `VI_ERROR_NSUP_OPER`, NI and R&S both answer
+`VI_ERROR_INVALID_MODE`. Asserting one specific code made a check that failed
+two conforming implementations, so it now accepts either and records which was
+used.
 
 Likewise, VXI-11 locks are exclusive, per-link and non-nesting (RULE B.6.72).
 The protocol has no shared-lock concept and no field to carry a key, so a
@@ -219,6 +258,19 @@ shared lock coming back with an empty key is not a backend that lost it.
 
 The suite now expects the addressed modes to succeed and the unaddressed ones
 to be refused, and treats the shared-lock key as a HiSLIP-only assertion.
+
+### An access key returned for an exclusive lock
+
+VPP-4.3 leaves `accessKey` unused for an exclusive lock, so pyvisa-py's empty
+string is right. NI and R&S both hand back a generated key anyway. Nothing
+depends on it being empty, and two implementations doing it means it is a
+convention rather than a mistake, so the suite records it instead of failing
+it.
+
+Related and genuinely inconsistent: shared-lock keys come back as `str` from
+pyvisa-py and `bytes` from NI-VISA. A caller comparing the key it passed
+against the key it got back therefore has to know which backend it is on. That
+is a pyvisa-level wart rather than a pyvisa-py one.
 
 ### Three harness bugs that presented as client transport bugs
 
@@ -239,3 +291,28 @@ finding first:
 
 A harness that leaks state produces findings that point anywhere but at the
 harness.
+
+---
+
+## Not yet triaged
+
+The VXI-11 vendor run left 17 checks that pyvisa-py passes and **both** vendors
+fail, plus a cluster that only R&S fails (multiple sessions, error-queue
+cleanliness, recovery after a timeout). None of those are claims yet, in either
+direction.
+
+Two readings are possible for each and they need separating one at a time:
+
+- the check encodes pyvisa-py's behaviour rather than the spec's, and the
+  vendors are right -- which is what happened with the REN error codes above;
+- or the vendors genuinely differ, in which case the finding belongs to them.
+
+A third possibility applies to at least one: `closing the session destroys the
+link` fails at *cycle 0* under both vendors, with a message asserting the
+server ran out of links. Failing on the very first iteration means the message
+is wrong about its own cause, so that one is a check bug before it is anything
+else.
+
+Until each has been through that, they stay here rather than in the lists
+above. A suite that reports 17 vendor failures it has not investigated is
+making 17 claims it cannot support.
