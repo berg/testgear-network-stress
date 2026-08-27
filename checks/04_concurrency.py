@@ -233,17 +233,25 @@ def main() -> int:
         time.sleep(1.0)  # give any lingering threads a chance to exit
 
         leaked_threads = threading.active_count() - base_threads
-        leaked_fds = visa.open_fd_count() - base_fds
         stats.check(
             leaked_threads <= 1,
             f"{cycles} open/close cycles leaked no threads "
             f"(delta {leaked_threads})",
         )
-        stats.check(
-            leaked_fds <= 2,
-            f"{cycles} open/close cycles leaked no descriptors "
-            f"(delta {leaked_fds})",
-        )
+        # No fd directory to count on Windows. Saying so beats subtracting two
+        # sentinels and reporting a delta of zero as a pass.
+        if base_fds < 0:
+            stats.skip(
+                f"{cycles} open/close cycles leaked no descriptors",
+                "this platform exposes no open-descriptor count",
+            )
+        else:
+            leaked_fds = visa.open_fd_count() - base_fds
+            stats.check(
+                leaked_fds <= 2,
+                f"{cycles} open/close cycles leaked no descriptors "
+                f"(delta {leaked_fds})",
+            )
         stats.note(
             f"after {cycles} cycles: {threading.active_count()} threads, "
             f"{visa.open_fd_count()} fds"

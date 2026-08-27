@@ -154,11 +154,17 @@ class Stats:
             if exc is not None and self.verbose:
                 traceback.print_exc()
 
-    def skip(self, message: str) -> None:
+    def skip(self, message: str, reason: str = "") -> None:
+        """Record a check that did not run, and why.
+
+        The reason is what the report shows in place of a result, so a skip
+        reads as an explained absence rather than as a silent pass.
+        """
         with self._lock:
-            self.skipped.append(message)
-            self.results.append(Result(message, SKIP, detail=message))
-            print(f"  SKIP {message}")
+            detail = f"{message}: {reason}" if reason else message
+            self.skipped.append(detail)
+            self.results.append(Result(message, SKIP, detail=detail))
+            print(f"  SKIP {detail}")
 
     def note(self, message: str) -> None:
         with self._lock:

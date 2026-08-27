@@ -60,8 +60,10 @@ def binary_path(build: bool = True) -> Path:
             raise ServerUnavailable(f"TESTGEAR_MOCK_SERVER={override} does not exist")
         return path
 
+    # Windows appends .exe; everywhere else the bare name is the binary.
+    exe = ".exe" if sys.platform == "win32" else ""
     for profile in ("release", "debug"):
-        candidate = CRATE / "target" / profile / "testgear-mock-server"
+        candidate = CRATE / "target" / profile / f"testgear-mock-server{exe}"
         if candidate.exists():
             return candidate
 

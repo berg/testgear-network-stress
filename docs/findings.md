@@ -695,3 +695,37 @@ else -- a citation does not make a check right, it only makes it answerable.
 Until each has been through that, they stay here rather than in the lists
 above. A suite that reports 17 vendor failures it has not investigated is
 making 17 claims it cannot support.
+## Could the mock server be causing these?
+
+Worth asking directly, because the mock is the one component every result
+passes through, and it is derived from ugpibd rather than from a vendor
+instrument. If it does something unusual, a client that is stricter than the
+others would look broken.
+
+Two things bound the risk.
+
+**All three implementations run against the identical server.** A server quirk
+applies equally to every column, so it cannot by itself produce a failure in
+one column and passes in the other two. For the mock to explain a pyvisa-py-only
+result it would have to do something that *only pyvisa-py* is sensitive to --
+possible, but a much narrower claim than "the mock is wrong".
+
+**Eleven of the fourteen confirmed findings involve no wire exchange whose
+outcome the server could influence.** They are attribute reads and writes,
+argument validation, and resource-name parsing -- decided inside the client
+before or without any exchange. Two reproduce with no mock process running at
+all, against an address with nothing listening:
+
+    viClose(VI_NULL)                     -> VI_ERROR_INV_OBJECT
+                                            (3.4.3 requires VI_WARN_NULL_OBJECT)
+    viParseRsrc tcpip0::...::instr       -> InterfaceType.unknown
+    viParseRsrc TCPIP0::...::INSTR       -> InterfaceType.tcpip
+                                            (4.3.17 requires a case-insensitive compare)
+
+The remaining three are the lock-nesting and shared-key findings, where the
+server does participate. Those are the ones a second server implementation
+would most usefully re-test; the vendors passing them against this same server
+is evidence, but not the same quality of evidence as the eleven above.
+
+The honest summary: the mock is a real confound for 3 of 14 findings and
+effectively not a confound for the other 11.
