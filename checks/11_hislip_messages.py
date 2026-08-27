@@ -199,6 +199,68 @@ def check_recovery_after_mismatch():
         )
 
 
+@check("the MessageID resets to 0xFFFFFF00 after a device clear",
+       rule="IVI-6.1 3.1.2")
+def check_message_id_reset_on_clear():
+    """3.1.2, and step 8 of the device-clear procedure: "The MessageID is
+    reset to 0xffff ff00 after device clear, and when the connection is
+    initialized."
+
+    Both ends reset, so a client that keeps counting is immediately out of
+    step with a server that started again -- and every subsequent DataEND
+    then fails the rule-1 check the client itself is supposed to apply. The
+    symptom is not a wrong answer but a session that stops working after its
+    first clear.
+    """
+    srv = server()
+    with open_inst() as inst:
+        inst.timeout = 3000
+        srv.reset()
+        for _ in range(3):
+            inst.query("*IDN?")
+        before = client_ids(srv)
+        assert len(before) >= 3, f"expected 3 messages, saw {len(before)}"
+        assert before[-1] != INITIAL_MESSAGE_ID, (
+            "the counter had not advanced, so a reset cannot be observed"
+        )
+
+        inst.clear()
+        srv.reset()
+        inst.query("*IDN?")
+        after = client_ids(srv)
+        assert after, "no message followed the device clear"
+        assert after[0] == INITIAL_MESSAGE_ID, (
+            f"the first MessageID after a device clear was {after[0]:#010x}, "
+            f"expected {INITIAL_MESSAGE_ID:#010x}. The server resets too, so a "
+            f"client that keeps counting is out of step from here on"
+        )
+        return f"{before[-1]:#010x} -> clear -> {after[0]:#010x}"
+
+
+@check("the client reports whether overlap mode is in use", rule="IVI-6.1 2.7")
+def check_overlap_mode_attribute():
+    """2.7: "All HiSLIP clients shall support both synchronized and overlapped
+    mode."
+
+    Which mode a session is in changes what the client is allowed to do with
+    MessageIDs, so a caller has to be able to find out. VPP-4.3 5.1.17 makes
+    VI_ATTR_TCPIP_HISLIP_OVERLAP_EN required for exactly that reason.
+    """
+    from pyvisa.constants import ResourceAttribute as RA
+
+    with open_inst() as inst:
+        value, st = visa.call(
+            inst.visalib.get_attribute, inst.session, RA.tcpip_hislip_overlap_enable
+        )
+        from pyvisa.constants import StatusCode
+
+        assert st == StatusCode.success and value is not None, (
+            f"VI_ATTR_TCPIP_HISLIP_OVERLAP_EN is not readable ({st!r}), so a "
+            f"caller cannot tell which mode the session negotiated"
+        )
+        return f"overlap_en={value!r}"
+
+
 @check("every client message carries the HS prologue", rule="IVI-6.1 2.3")
 def check_prologue():
     """2.3: the prologue "shall be ASCII 'HS'".
