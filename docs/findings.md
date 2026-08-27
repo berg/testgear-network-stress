@@ -192,6 +192,38 @@ sessions decide whether they are sharing a lock, so a client that truncated
 instead would let two sessions with different keys share a lock neither asked to
 share.
 
+### Required INSTR attributes are missing (VPP-4.3 5.1.11, 5.1.12, 5.1.17)
+
+**Status:** open, vendor confirmation pending.
+
+VPP-4.3 5.1 lists, in plain prose, the attributes an implementation SHALL
+support. They stack by specificity: every INSTR resource, then every
+message-based one, then TCPIP, then HiSLIP. Reading each list back:
+
+| clause | applies to | missing on HiSLIP | missing on VXI-11 |
+| --- | --- | --- | --- |
+| 5.1.11 | every INSTR resource | `VI_ATTR_TRIG_ID` | `VI_ATTR_INTF_INST_NAME`, `VI_ATTR_INTF_NUM`, `VI_ATTR_TRIG_ID`, `VI_ATTR_DMA_ALLOW_EN` |
+| 5.1.12 | message-based, TCPIP named explicitly | &mdash; | `VI_ATTR_IO_PROT`, `VI_ATTR_RD_BUF_OPER_MODE`, `VI_ATTR_WR_BUF_OPER_MODE`, `VI_ATTR_FILE_APPEND_EN` |
+| 5.1.16 | any TCPIP INSTR | &mdash; | &mdash; |
+| 5.1.17 | HiSLIP TCPIP | `VI_ATTR_TCPIP_PORT`, `VI_ATTR_TCPIP_NODELAY` | n/a |
+
+**This corrects something previously written down as harmless.** The HiSLIP
+suite this repo grew out of recorded that `VI_ATTR_TCPIP_PORT` "is set but
+unreadable on HiSLIP sessions", reasoning that "the VISA spec defines it for
+SOCKET and VICP resources, not TCPIP INSTR, so the entry in `after_parsing` is
+dead. Harmless."
+
+RULE 5.1.17 says the opposite in as many words: an INSTR resource
+implementation for a HiSLIP TCPIP system SHALL support `VI_ATTR_TCPIP_PORT`,
+along with `VI_ATTR_TCPIP_NODELAY`. The attribute is required, the dead entry
+is a real gap, and the earlier conclusion was reached by reasoning about the
+spec rather than by reading it -- which is exactly the failure mode the note in
+this repo about never citing a clause from memory exists to prevent.
+
+The VXI-11 column is the larger gap, and `VI_ATTR_IO_PROT` appears in it, which
+matches the separately-recorded observation that the attribute reads back over
+HiSLIP and not over VXI-11. 5.1.12 makes it required on both.
+
 ### The resource template is largely unimplemented (VPP-4.3 3.2, 3.3, 3.4, 3.7)
 
 **Status:** open, and **not yet confirmed against a vendor** -- the build host
