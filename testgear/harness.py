@@ -143,9 +143,14 @@ class Stats:
     def error(self, message: str, exc: BaseException | None = None, rule: str = "") -> None:
         with self._lock:
             detail = f"{message}: {type(exc).__name__}: {exc}" if exc else message
-            self.failures.append(detail)
-            self.results.append(Result(message, FAIL, detail=detail, rule=rule))
-            print(f"  FAIL {detail}")
+            # Render the clause the same way check() does. It was being stored
+            # and not shown, so a cited failure read as an uncited one in the
+            # summary -- and whether a failure cites a clause is the property
+            # this suite uses to decide how much to trust it.
+            cited = f"{detail} [{rule}]" if rule else detail
+            self.failures.append(cited)
+            self.results.append(Result(message, FAIL, detail=cited, rule=rule))
+            print(f"  FAIL {cited}")
             if exc is not None and self.verbose:
                 traceback.print_exc()
 

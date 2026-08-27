@@ -112,11 +112,34 @@ def main() -> int:
             # here means the trigger *arrived* and the instrument had nothing
             # to do with it, which is itself proof the message got through.
             visa.check_errors(inst, stats, "after assert_trigger")
+            # VPP-4.3 6.1.7 lists VI_ERROR_INV_PROT among viAssertTrigger's
+            # error codes, so refusing a protocol the transport cannot perform
+            # is available and correct. It is not asserted here, because
+            # NI-VISA accepts a non-default protocol over HiSLIP too and a
+            # check that fails a shipping implementation on this point is
+            # making a stronger claim than the clause supports.
+            #
+            # What is worth recording is that pyvisa-py answers differently on
+            # its two transports: VI_ERROR_NSUP_OPER over HiSLIP, VI_SUCCESS
+            # over VXI-11, for a protocol neither can actually perform.
             st = visa.status(lib.assert_trigger, sess, constants.TriggerProtocol.on)
-            stats.check(
-                st == StatusCode.error_nonsupported_operation,
-                f"a non-default trigger protocol is refused cleanly, got {st!r}",
-            )
+            if st == StatusCode.success:
+                stats.note(
+                    f"a non-default trigger protocol was accepted ({st!r}); "
+                    f"VPP-4.3 6.1.7 offers VI_ERROR_INV_PROT for this, and "
+                    f"this backend refuses it on the other transport"
+                )
+            else:
+                stats.check(
+                    st
+                    in (
+                        StatusCode.error_nonsupported_operation,
+                        StatusCode.error_invalid_protocol,
+                    ),
+                    f"a non-default trigger protocol is refused cleanly, "
+                    f"got {st!r}",
+                    rule="VPP-4.3 6.1.7",
+                )
 
             # -- clear ------------------------------------------------------
             stats.check(visa.status(lib.clear, sess) == StatusCode.success, "viClear")
@@ -273,7 +296,12 @@ def main() -> int:
             for name, expected in attributes:
                 value, st = visa.call(lib.get_attribute, sess, getattr(RA, name))
                 if st != StatusCode.success:
-                    stats.error(f"{name} is not readable ({st!r})")
+                    # RULE 5.1.12 requires these of any message-based INSTR
+                    # resource, TCPIP named explicitly, so an unreadable one
+                    # is a cited failure rather than an observation.
+                    stats.error(
+                        f"{name} is not readable ({st!r})", rule="VPP-4.3 5.1.12"
+                    )
                 elif expected is None:
                     stats.check(value is not None, f"{name} = {value!r}")
                 else:
