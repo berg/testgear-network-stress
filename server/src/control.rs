@@ -155,6 +155,13 @@ async fn handle(request: Request, ctl: &Control) -> Response {
             guard.reset_devices();
             Response::Ok { ok: true }
         }
+        // `set` replaces the whole fault set rather than merging into it, so
+        // an empty config is a clear. The alternative -- treating an absent
+        // field as "leave unchanged", the way the byte-level FaultConfig has
+        // to -- made disarming impossible: a persistent create_link error
+        // armed by one check survived its own cleanup and every session
+        // opened afterwards failed with VI_ERROR_RSRC_NFOUND, in a check
+        // about keepalive.
         Request::Vxi11Faults { config } => {
             ctl.vxi11.set(config);
             Response::Ok { ok: true }

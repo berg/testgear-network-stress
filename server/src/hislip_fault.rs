@@ -70,6 +70,19 @@ pub struct HislipFaults {
     /// prologue exactly this job -- letting a device notice it is out of sync
     /// -- so a client that ignores it is ignoring its only framing check.
     pub break_prologue: Option<bool>,
+    /// Split every server DataEND into a Data of this many payload bytes
+    /// followed by a DataEND carrying the rest.
+    ///
+    /// The server chunks its replies only when one exceeds the maximum the
+    /// client declared, and a client declaring a megabyte never provokes it --
+    /// so `Data` messages simply never occur, and IVI-6.1 3.1.2 rule 2, which
+    /// is entirely about receiving one, could not be tested at all.
+    ///
+    /// This produces a genuinely chunked reply rather than a malformed one:
+    /// both messages carry the same MessageID, which is what the server itself
+    /// emits when the client's maximum is small. It is a *shape* knob, not a
+    /// fault, and it is what makes the rule-2 fault reachable.
+    pub split_data_end_at: Option<usize>,
 }
 
 impl HislipFaults {
@@ -77,6 +90,7 @@ impl HislipFaults {
         self.skew_data_end_id.is_some()
             || self.skew_data_id.is_some()
             || self.break_prologue.unwrap_or(false)
+            || self.split_data_end_at.is_some()
     }
 }
 
@@ -165,6 +179,18 @@ impl Tracker {
             return None;
         }
 
+        // Splitting changes the buffer's length, so it is done first and on
+        // its own: rewriting offsets computed against the original buffer
+        // after inserting a message would corrupt every later one.
+        if let Some(cut) = faults.split_data_end_at {
+            if let Some(split) = split_first_data_end(buf, start, cut) {
+                self.faults.lock().unwrap().split_data_end_at = None;
+                // Re-enter so an armed skew still lands, now that there is a
+                // Data message for it to land on.
+                return Some(self.rewrite(&split).unwrap_or(split));
+            }
+        }
+
         let mut out = buf.to_vec();
         let mut changed = false;
         for (rel, header) in found {
@@ -198,6 +224,61 @@ impl Tracker {
             None
         }
     }
+}
+
+/// Rewrite the first DataEND at or after `start` as Data + DataEND.
+///
+/// Returns None when there is no DataEND with more than `cut` payload bytes,
+/// so a caller can tell "nothing to split" from "split".
+fn split_first_data_end(buf: &[u8], start: usize, cut: usize) -> Option<Vec<u8>> {
+    if cut == 0 {
+        return None;
+    }
+    for (rel, header) in headers(&buf[start..]) {
+        if header.message_type != MSG_DATA_END {
+            continue;
+        }
+        let payload_len = header.payload_len as usize;
+        if payload_len <= cut {
+            continue;
+        }
+        let at = start + rel;
+        let body = at + HEADER_LEN;
+        let end = body + payload_len;
+        if end > buf.len() {
+            return None; // still arriving; leave it alone
+        }
+
+        let mut out = Vec::with_capacity(buf.len() + HEADER_LEN);
+        out.extend_from_slice(&buf[..at]);
+        out.extend_from_slice(&message(
+            MSG_DATA,
+            header.control_code,
+            header.message_parameter,
+            &buf[body..body + cut],
+        ));
+        out.extend_from_slice(&message(
+            MSG_DATA_END,
+            header.control_code,
+            header.message_parameter,
+            &buf[body + cut..end],
+        ));
+        out.extend_from_slice(&buf[end..]);
+        return Some(out);
+    }
+    None
+}
+
+/// One HiSLIP message, header and payload (IVI-6.1 Table 2).
+fn message(message_type: u8, control_code: u8, parameter: u32, payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(HEADER_LEN + payload.len());
+    out.extend_from_slice(&PROLOGUE);
+    out.push(message_type);
+    out.push(control_code);
+    out.extend_from_slice(&parameter.to_be_bytes());
+    out.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+    out.extend_from_slice(payload);
+    out
 }
 
 struct Header {

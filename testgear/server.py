@@ -211,7 +211,20 @@ class MockServer:
         """Clear every fault and empty the observation log."""
         self._command(cmd="reset")
 
+    #: Set TESTGEAR_DISABLE_FAULTS=1 to make every arming call a no-op.
+    #:
+    #: This is a negative control for the suite itself. A check built on fault
+    #: injection is only worth what the injection is worth, and a check that
+    #: passes whether or not its fault fires is not testing the fault -- it is
+    #: testing nothing, quietly. Running the fault-dependent checks with this
+    #: set should make them *fail*; any that still pass are suspect.
+    @property
+    def _faults_disabled(self) -> bool:
+        return os.environ.get("TESTGEAR_DISABLE_FAULTS", "") not in ("", "0", "false")
+
     def set_faults(self, **config) -> dict:
+        if self._faults_disabled:
+            return self._command(cmd="faults", config={})
         return self._command(cmd="faults", config=config)
 
     def observed(self) -> list[dict]:
@@ -240,7 +253,9 @@ class MockServer:
         return self._command(cmd="hislip_messages")["messages"]
 
     def set_hislip_faults(self, **config) -> None:
-        self._command(cmd="hislip_faults", config=config)
+        self._command(
+            cmd="hislip_faults", config={} if self._faults_disabled else config
+        )
 
     @contextlib.contextmanager
     def hislip_faults(self, **config):
@@ -264,7 +279,9 @@ class MockServer:
 
     def set_vxi11_faults(self, **config) -> None:
         """Arm the RPC-level VXI-11 faults (error codes, maxRecvSize, ...)."""
-        self._command(cmd="vxi11_faults", config=config)
+        self._command(
+            cmd="vxi11_faults", config={} if self._faults_disabled else config
+        )
 
     @contextlib.contextmanager
     def vxi11_faults(self, **config):

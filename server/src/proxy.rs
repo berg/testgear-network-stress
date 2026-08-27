@@ -148,13 +148,17 @@ async fn pump(
             }
 
             forwarded += chunk.len() as u64;
-            if let Some(h) = &hislip {
-                h.observe(chunk, "server");
-            }
             let rewritten = tracker
                 .as_ref()
                 .and_then(|t| t.rewrite_replies(chunk))
                 .or_else(|| hislip.as_ref().and_then(|h| h.rewrite(chunk)));
+            // Record what the *client* receives, not what the server sent.
+            // Observing before the rewrite made the log describe a message
+            // nobody saw -- a split reply still read as one DataEND, so there
+            // was no way to confirm an injection had happened at all.
+            if let Some(h) = &hislip {
+                h.observe(rewritten.as_deref().unwrap_or(chunk), "server");
+            }
             match &rewritten {
                 Some(body) => write_chunk(&mut client_tx, body, &faults).await?,
                 None => write_chunk(&mut client_tx, chunk, &faults).await?,

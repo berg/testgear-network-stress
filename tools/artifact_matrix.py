@@ -5,10 +5,12 @@
 Distinct from `testgear/report.py`, which writes a standalone file for local
 viewing; this emits body-only HTML for publishing as an artifact.
 
-Every non-passing cell carries its own reason as hover text -- why a check was
-skipped, or what a failure actually said. A grid of PASS/FAIL/SKIP without that
-is a page you have to go and read the JSON to understand, and the reason a
-check skipped is exactly the thing most likely to be missed.
+Any row with a non-passing result expands on click to the full detail -- the
+whole traceback, the whole skip reason, per implementation. A grid of
+PASS/FAIL/SKIP without that is a page you have to go and read the JSON to
+understand, and a truncated reason is worse than none: it produced a
+VI_ERROR_RSRC_NFOUND under a check named after keepalive, which reads as
+nonsense until the frame it came from is visible.
 
     tools/artifact_matrix.py --out page.html \\
         --reports hislip=reports-hislip vxi11=reports-vxi11
@@ -107,10 +109,30 @@ td.st{text-align:center;font-family:var(--mono);font-size:.7rem;font-weight:600;
   letter-spacing:.04em;white-space:nowrap}
 td.PASS{color:var(--pass)} td.FAIL{color:var(--fail)}
 td.SKIP{color:var(--skip)} td.none{color:var(--muted)}
-/* A cell with a reason behind it is marked as such, so it is discoverable
-   rather than something you have to guess is hoverable. */
-td.st.why{cursor:help;text-decoration:underline;text-decoration-style:dotted;
-  text-underline-offset:3px;text-decoration-thickness:1px}
+/* A row with detail behind it announces itself with a caret and reacts to
+   the pointer, so it is discoverable rather than something you have to guess
+   is clickable. */
+tr.expandable{cursor:pointer}
+tr.expandable:hover td{background:var(--rule-soft)}
+tr.expandable.differs:hover td{background:var(--fail-wash);filter:brightness(.97)}
+.caret{display:inline-block;width:.85em;margin-right:.35em;color:var(--muted);
+  transition:transform .12s ease}
+.caret.spacer{visibility:hidden}
+tr.expandable[aria-expanded="true"] .caret{transform:rotate(90deg)}
+tr.detail-row td{padding:0 .75rem .9rem;background:var(--rule-soft)}
+.detail-block{margin-top:.75rem;border-left:2px solid var(--rule);
+  padding-left:.85rem}
+.detail-head{font-family:var(--cond);font-size:.78rem;font-weight:600;
+  letter-spacing:.04em;color:var(--muted);margin-bottom:.15rem}
+.detail-head .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;
+  letter-spacing:.05em;margin-right:.45rem}
+.detail-head .tag.FAIL{color:var(--fail)}
+.detail-head .tag.SKIP{color:var(--skip)}
+.detail-sum{font-size:.82rem;margin-bottom:.4rem;max-width:80ch}
+.detail-block pre{font-family:var(--mono);font-size:.72rem;line-height:1.5;
+  margin:0;padding:.6rem .7rem;background:var(--panel);
+  border:1px solid var(--rule);border-radius:3px;
+  overflow-x:auto;white-space:pre;color:var(--ink)}
 .findings{background:var(--panel);border:1px solid var(--rule);border-radius:3px;
   padding:1rem 1.15rem}
 .findings table{min-width:34rem;font-size:.82rem}
@@ -131,20 +153,31 @@ def esc(value) -> str:
 
 
 def reason(result: dict) -> str:
-    """The text behind a non-passing cell.
+    """The full text behind a non-passing result, kept verbatim.
 
-    Tracebacks get trimmed to their last line: the whole stack is in the JSON
-    for anyone who wants it, and a tooltip carrying forty frames is a tooltip
-    nobody reads.
+    Nothing is trimmed. An earlier version cut tracebacks to their last line,
+    which turned "the session could not be opened" into a bare
+    VI_ERROR_RSRC_NFOUND under a check named after keepalive -- an error that
+    reads as nonsense until you can see the frame it came from. The whole
+    stack is what makes that diagnosable, so the whole stack is what the page
+    shows.
     """
-    detail = (result.get("detail") or "").strip()
+    return (result.get("detail") or "").strip()
+
+
+def summary_line(detail: str) -> str:
+    """One line for the collapsed state.
+
+    For a traceback that is the exception, which is the last line; for an
+    assertion message it is the message itself.
+    """
     if not detail:
         return ""
-    if "Traceback (most recent call last)" in detail:
-        lines = [ln.strip() for ln in detail.splitlines() if ln.strip()]
-        detail = lines[-1] if lines else detail
-    detail = " ".join(detail.split())
-    return detail[:600]
+    lines = [ln.strip() for ln in detail.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    text = lines[-1] if "Traceback (most recent call last)" in detail else lines[0]
+    return " ".join(text.split())
 
 
 def load(root: Path):
@@ -231,37 +264,59 @@ def render_protocol(protocol: str, cols, lookups, out) -> None:
     w("<thead><tr><th>Check</th>"
       + "".join(f'<th class="st">{esc(c["short"])}</th>' for c in cols)
       + "</tr></thead><tbody>")
+    row_id = 0
     for script, rows in groups.items():
         w(f'<tr class="grp"><td colspan="{len(cols) + 1}">{esc(script)}</td></tr>')
         for k, name, rule in rows:
-            cells, outcomes = [], set()
-            for lk in lookups:
+            row_id += 1
+            uid = f"{protocol}-{row_id}"
+            cells, outcomes, details = [], set(), []
+            for lk, column in zip(lookups, cols):
                 r = lk.get(k)
                 if r is None:
                     outcomes.add("none")
-                    cells.append(
-                        '<td class="st none" title="this check did not run '
-                        'against this implementation">&mdash;</td>'
-                    )
+                    cells.append('<td class="st none">&mdash;</td>')
                     continue
                 outcome = r["outcome"]
                 outcomes.add(outcome)
-                why = reason(r) if outcome != "PASS" else ""
-                if why:
-                    cells.append(
-                        f'<td class="st {outcome} why" title="{esc(why)}">'
-                        f"{outcome}</td>"
-                    )
-                else:
-                    cells.append(f'<td class="st {outcome}">{outcome}</td>')
+                text = reason(r) if outcome != "PASS" else ""
+                if text:
+                    details.append((column["short"], outcome, text))
+                cells.append(f'<td class="st {outcome}">{outcome}</td>')
+
             classes = []
             if len(outcomes) > 1:
                 classes.append("differs")
             elif outcomes == {"SKIP"}:
                 classes.append("allskip")
+            if details:
+                classes.append("expandable")
             rule_html = f'<span class="rule">{esc(rule)}</span>' if rule else ""
-            w(f'<tr class="{" ".join(classes)}">'
-              f'<td class="check">{esc(name)}{rule_html}</td>{"".join(cells)}</tr>')
+
+            if details:
+                marker = '<span class="caret" aria-hidden="true">&#9656;</span>'
+                w(f'<tr class="{" ".join(classes)}" data-row="{uid}" '
+                  f'tabindex="0" role="button" aria-expanded="false" '
+                  f'aria-controls="d-{uid}">'
+                  f'<td class="check">{marker}{esc(name)}{rule_html}</td>'
+                  f'{"".join(cells)}</tr>')
+                panel = []
+                for who, outcome, text in details:
+                    head = summary_line(text)
+                    panel.append(
+                        f'<div class="detail-block">'
+                        f'<div class="detail-head"><span class="tag {outcome}">'
+                        f"{outcome}</span> {esc(who)}</div>"
+                        + (f'<div class="detail-sum">{esc(head)}</div>'
+                           if head and head != text else "")
+                        + f"<pre>{esc(text)}</pre></div>"
+                    )
+                w(f'<tr class="detail-row" id="d-{uid}" hidden>'
+                  f'<td colspan="{len(cols) + 1}">{"".join(panel)}</td></tr>')
+            else:
+                w(f'<tr class="{" ".join(classes)}">'
+                  f'<td class="check"><span class="caret spacer"></span>'
+                  f'{esc(name)}{rule_html}</td>{"".join(cells)}</tr>')
     w("</tbody></table></div>")
     w("</section>")
 
@@ -353,8 +408,8 @@ def main() -> int:
     w("<h1>VISA Conformance Matrix</h1>")
     w('<p class="lede">Spec-cited conformance checks over HiSLIP and VXI-11, run '
       'from one container against one fault-injecting mock server. Rows where the '
-      'implementations disagree carry colour; hover any FAIL or SKIP for the '
-      'reason.</p>')
+      'implementations disagree carry colour. Click any row with a caret for the '
+      'full failure or skip detail.</p>')
     w('<div class="spec">'
       f'<span>pyvisa <b>{esc(ctx.get("pyvisa", "?"))}</b></span>'
       f'<span>pyvisa-py <b>{esc(ctx.get("pyvisa-py commit", "?"))}</b></span>'
@@ -381,6 +436,31 @@ def main() -> int:
         w(f"<tr><td>{who}</td><td>{text}</td></tr>")
     w("</tbody></table></div></section>")
 
+    w("""<script>
+(function () {
+  // Delegated so the handler count does not scale with the table, and so
+  // keyboard users get the same affordance as the pointer: the rows are
+  // role="button" and tabbable, which is meaningless without Enter/Space.
+  function toggle(row) {
+    var panel = document.getElementById('d-' + row.dataset.row);
+    if (!panel) return;
+    var open = row.getAttribute('aria-expanded') === 'true';
+    row.setAttribute('aria-expanded', open ? 'false' : 'true');
+    panel.hidden = open;
+  }
+  document.addEventListener('click', function (e) {
+    var row = e.target.closest('tr.expandable');
+    if (row) toggle(row);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var row = e.target.closest && e.target.closest('tr.expandable');
+    if (!row) return;
+    e.preventDefault();
+    toggle(row);
+  });
+})();
+</script>""")
     w("<footer>Skips are counted and coloured separately from passes throughout. "
       "A skipped check reads like a passing one at a glance, and the ones that "
       "matter are those that stay skipped run after run &mdash; so every skip "

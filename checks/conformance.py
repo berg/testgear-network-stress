@@ -53,13 +53,31 @@ def restart_server() -> None:
     old = CTX.get("server")
     if old is None:
         return
-    fresh = MockServer(proxy=old._proxy).start()
-    CTX["server"] = fresh
-    CTX["resource"] = fresh.resource(CTX["protocol"])
+
+    # Stop the old server *first*. Starting the replacement while it still
+    # holds port 111 makes the new one come up without a portmapper, and its
+    # VXI-11 resource then degrades to the TCPIP0::host,port::inst0::INSTR
+    # shorthand -- which is a pyvisa-py extension. Every subsequent check
+    # against NI-VISA or R&S then failed at viOpen with VI_ERROR_RSRC_NFOUND,
+    # in checks named after keepalive and locks, for a reason nothing in their
+    # output pointed at.
+    was_portmapped = getattr(old, "_portmap", False)
     try:
         old.stop()
     except Exception:  # noqa: BLE001
         pass
+
+    fresh = MockServer(proxy=old._proxy, portmap=was_portmapped).start()
+    CTX["server"] = fresh
+    CTX["resource"] = fresh.resource(CTX["protocol"])
+
+    # If the replacement could not reproduce the addressing the run started
+    # with, say so rather than let every later check fail at viOpen.
+    if ("," in old.resource(CTX["protocol"])) != ("," in CTX["resource"]):
+        print(
+            "      the replacement server uses a different resource form "
+            f"({CTX['resource']}); checks after this point may not open"
+        )
 
 
 def server():
@@ -146,13 +164,28 @@ def check_dribbled_reply():
     srv = server()
     with open_inst() as inst:
         srv.big_reply(200)
+        # Time the control first: without it, this check passes whether or not
+        # the fault fires, because an un-dribbled reply reassembles trivially.
+        # A check that cannot tell those apart is testing nothing.
+        plain_started = time.time()
+        inst.query("TEST:BIG?")
+        plain = time.time() - plain_started
+
+        started = time.time()
         with srv.faults(dribble=True):
             reply = inst.query("TEST:BIG?").strip()
+        dribbled = time.time() - started
+
         assert len(reply) == 200, (
             f"a 200-byte reply arriving one byte per segment came back as "
             f"{len(reply)} bytes"
         )
-        return "200 segments, reassembled"
+        assert dribbled > max(plain * 3, 0.05), (
+            f"the dribbled read took {dribbled * 1000:.0f}ms against "
+            f"{plain * 1000:.0f}ms un-dribbled, so the reply did not arrive in "
+            f"separate segments and this check proved nothing"
+        )
+        return f"200 segments in {dribbled * 1000:.0f}ms vs {plain * 1000:.0f}ms"
 
 
 @check("read_stb reports the status byte", rule="VPP-4.3 3.3.1",

@@ -371,6 +371,37 @@ The VXI-11 column is the larger gap, and `VI_ATTR_IO_PROT` appears in it, which
 matches the separately-recorded observation that the attribute reads back over
 HiSLIP and not over VXI-11. 5.1.12 makes it required on both.
 
+### A mis-addressed Data message is accepted, and the reply silently truncated
+
+**Status:** open. HiSLIP. The most serious client-side finding here.
+
+IVI-6.1 3.1.2 rule 2: on receiving a `Data` message whose MessageID is not the
+one last sent, the client shall clear any buffered responses and discard the
+message. pyvisa-py implements rule 1, the `DataEND` case, correctly -- and does
+not implement rule 2.
+
+Splitting a 500-byte reply into `Data`(120) + `DataEND`(380) and skewing the
+MessageID on the `Data` message, pyvisa-py returns **381 bytes and no error**.
+The mis-addressed chunk is dropped and the rest is handed to the caller as a
+complete reply.
+
+Silent truncation is the worst available outcome. A wrong MessageID means the
+client and server disagree about which request is being answered, and nothing
+downstream can tell that the value it received is 76% of the real one. An error
+would be recoverable; this is not detectable.
+
+**Why it went unfound until now.** ugpibd chunks a reply only when it exceeds
+the maximum the client declared, and pyvisa-py declares a megabyte, so every
+reply arrived as a single `DataEND` and no `Data` message ever existed. The
+check for rule 2 skipped for months of wall-clock and, in its first version,
+armed a fault that could not fire and reported the resulting success as a
+failure. The proxy now splits a reply into the same shape a real server
+produces against a client with a smaller maximum, which makes both rule 2 and
+the chunked-reassembly path testable at all.
+
+The positive control passes: an unskewed `Data` + `DataEND` pair reassembles to
+the full 500 bytes.
+
 ### The resource template is largely unimplemented (VPP-4.3 3.2, 3.3, 3.4, 3.7)
 
 **Status:** open, and **confirmed**. NI-VISA and R&S VISA both pass every entry

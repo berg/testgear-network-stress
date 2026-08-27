@@ -129,44 +129,75 @@ def check_data_end_id_mismatch():
         )
 
 
+@check("a reply arriving as Data then DataEND is reassembled",
+       rule="IVI-6.1 3.1.1")
+def check_chunked_reply():
+    """The positive control for the chunked path, and until now untested.
+
+    ugpibd chunks a reply only when it exceeds the maximum the client
+    declared, and pyvisa-py declares a megabyte -- so every reply arrived as a
+    single DataEND and the multi-message path was never exercised at all. The
+    proxy now splits one, which is the same shape the server produces against
+    a client with a smaller maximum.
+    """
+    srv = server()
+    srv.big_reply(500)
+    with open_inst() as inst:
+        inst.timeout = 3000
+        srv.reset()
+        with srv.hislip_faults(split_data_end_at=120):
+            reply = inst.query("TEST:BIG?").strip()
+        kinds = {
+            m["message_type"] for m in srv.hislip_messages() if m["from"] == "server"
+        }
+        assert MSG_DATA in kinds, (
+            "the reply did not arrive as Data + DataEND, so the chunked path "
+            "was not exercised"
+        )
+        assert len(reply) == 500, (
+            f"a 500-byte reply split across Data and DataEND came back as "
+            f"{len(reply)} bytes"
+        )
+        return "500B across Data + DataEND"
+
+
 @check("a Data message with the wrong MessageID is discarded",
        rule="IVI-6.1 3.1.2")
 def check_data_id_mismatch():
     """3.1.2 rule 2, the same requirement for a non-final Data message.
 
-    Whether this can run at all depends on the *server*: a server that sends
-    every reply as a single DataEND, however large, never produces a Data
-    message for the fault to land on. The first version of this check did not
-    look, armed a fault that could never fire, and reported the resulting
-    success as a client failure -- a check bug wearing a finding's clothes.
-    So it establishes that a Data message actually occurs before claiming
-    anything about what the client did with one.
+    Reaching it needs a Data message to exist, and this server sends every
+    reply as a single DataEND however large. So the reply is split first --
+    a legitimate shape, not a fault -- and the MessageID on the resulting Data
+    message is then skewed.
+
+    An earlier version armed the skew without arranging for a Data message,
+    so the fault could never fire and the resulting success was reported as a
+    client failure. The split is what makes the check mean anything.
     """
     srv = server()
-    srv.big_reply(400_000)
+    srv.big_reply(500)
     with open_inst() as inst:
-        inst.timeout = 3000
+        inst.timeout = 2000
         srv.reset()
-        inst.query("TEST:BIG?")
+        with srv.hislip_faults(split_data_end_at=120, skew_data_id=6):
+            try:
+                reply = inst.query("TEST:BIG?")
+            except Exception as exc:  # noqa: BLE001
+                return f"discarded, reported as {visa.visa_status(exc)}"
+
         kinds = {
             m["message_type"] for m in srv.hislip_messages() if m["from"] == "server"
         }
         if MSG_DATA not in kinds:
             raise Skip(
-                "this server sends every reply as a single DataEND, even at "
-                "400 kB, so there is no Data message to mis-address. Rule 2 "
-                "needs a server that chunks its replies"
+                "the reply did not split, so there was no Data message to "
+                "mis-address and rule 2 was not reached"
             )
-
-        srv.reset()
-        with srv.hislip_faults(skew_data_id=6):
-            try:
-                reply = inst.query("TEST:BIG?")
-            except Exception as exc:  # noqa: BLE001
-                return f"discarded, reported as {visa.visa_status(exc)}"
         raise AssertionError(
-            f"a Data message with a mismatched MessageID was accepted; "
-            f"{len(reply)} bytes were returned"
+            f"a Data message with a MessageID six higher than the request's "
+            f"was accepted and {len(reply)} bytes were returned. 3.1.2 rule 2 "
+            f"requires it to be discarded and any buffered response cleared"
         )
 
 

@@ -59,13 +59,31 @@ def restart_server() -> None:
     old = CTX.get("server")
     if old is None:
         return
-    fresh = MockServer(proxy=old._proxy).start()
-    CTX["server"] = fresh
-    CTX["resource"] = fresh.resource(CTX["protocol"])
+
+    # Stop the old server *first*. Starting the replacement while it still
+    # holds port 111 makes the new one come up without a portmapper, and its
+    # VXI-11 resource then degrades to the TCPIP0::host,port::inst0::INSTR
+    # shorthand -- which is a pyvisa-py extension. Every subsequent check
+    # against NI-VISA or R&S then failed at viOpen with VI_ERROR_RSRC_NFOUND,
+    # in checks named after keepalive and locks, for a reason nothing in their
+    # output pointed at.
+    was_portmapped = getattr(old, "_portmap", False)
     try:
         old.stop()
     except Exception:  # noqa: BLE001
         pass
+
+    fresh = MockServer(proxy=old._proxy, portmap=was_portmapped).start()
+    CTX["server"] = fresh
+    CTX["resource"] = fresh.resource(CTX["protocol"])
+
+    # If the replacement could not reproduce the addressing the run started
+    # with, say so rather than let every later check fail at viOpen.
+    if ("," in old.resource(CTX["protocol"])) != ("," in CTX["resource"]):
+        print(
+            "      the replacement server uses a different resource form "
+            f"({CTX['resource']}); checks after this point may not open"
+        )
 
 
 def server():
@@ -212,11 +230,18 @@ def check_unknown_error_code():
 def check_recovery_after_error():
     srv = server()
     with open_inst() as inst:
+        fired = False
         with srv.vxi11_faults(error_on_proc=DEVICE_READ, error_code=4):
             try:
                 inst.query("*IDN?")
             except Exception:  # noqa: BLE001
-                pass
+                fired = True
+        # Without this the check passes when the injection does nothing:
+        # there is no error to recover from, so recovery is trivial.
+        assert fired, (
+            "the injected error 4 did not reach the client, so this check "
+            "never exercised recovery"
+        )
         reply = inst.query("*IDN?").strip()
         assert "," in reply, (
             f"the session did not recover from a single failed read: {reply!r}"
@@ -234,6 +259,11 @@ def check_stale_reply():
     """
     srv = server()
     with open_inst() as inst:
+        # The reply the *next* query must not return, so a client that
+        # consumed the stale record in its place can be caught. Without this
+        # the check passes whether or not the record was ever injected.
+        srv.respond("TEST:MARK?", "stale-sentinel")
+        raised = None
         with srv.vxi11_faults(stale_reply_before_proc=DEVICE_READ):
             try:
                 reply = inst.query("*IDN?").strip()
@@ -241,7 +271,12 @@ def check_stale_reply():
             except Exception as exc:  # noqa: BLE001
                 # Rejecting it is also correct -- better than consuming it --
                 # so long as the session survives.
+                raised = exc
                 detail = f"the stale record was rejected: {type(exc).__name__}"
+        assert raised is not None or "," in reply, (
+            "the injected stale record produced no observable effect at all, "
+            "so this check did not exercise anything"
+        )
         after = inst.query("*IDN?").strip()
         assert "," in after, (
             f"the stream did not resynchronise after a stale reply, "
@@ -298,29 +333,47 @@ def check_write_splitting():
     is invisible from the reply alone.
     """
     srv = server()
+    # A command rather than a query: a query left unanswered leaves the
+    # instrument addressed to talk, and the cleanup then costs a timeout per
+    # session. maxRecvSize applies at create_link, so the faulted and
+    # unfaulted cases need separate sessions -- but only two, not four. The
+    # first version opened four and exceeded the watchdog under NI-VISA, which
+    # tripped a server restart and made every check after it fail at viOpen.
+    payload = "*CLS;" + "*CLS;" * 80
+
+    with open_inst() as inst:
+        srv.reset()
+        inst.write(payload)
+        time.sleep(0.15)
+        plain_writes = len(srv.writes())
+        visa.drain_errors(inst)
+
     srv.set_vxi11_faults(max_recv_size=64)
     try:
         with open_inst() as inst:
-            srv.clear_observed()
-            payload = "TEST:SILENT? " + "x" * 400
+            srv.reset()
             inst.write(payload)
-            time.sleep(0.2)
+            time.sleep(0.15)
             writes = srv.writes()
             joined = "".join(writes)
+            visa.drain_errors(inst)
             assert payload in joined, (
                 f"the instrument did not receive the whole message; it saw "
                 f"{len(joined)} bytes across {len(writes)} writes"
             )
-            return f"{len(payload)}B arrived in {len(writes)} write(s)"
+            assert len(writes) > plain_writes, (
+                f"a maxRecvSize of 64 produced {len(writes)} write(s), the "
+                f"same as the {plain_writes} sent without it, so the message "
+                f"was not divided at all"
+            )
+            return (
+                f"{len(payload)}B arrived in {len(writes)} writes, against "
+                f"{plain_writes} unfaulted"
+            )
     finally:
         srv.set_vxi11_faults()
-        with open_inst() as inst:
-            visa.drain_errors(inst)
 
 
-# ---------------------------------------------------------------------------
-# Connection establishment
-# ---------------------------------------------------------------------------
 @check("opening a dead port fails cleanly", rule="VPP-4.3 3.1.1")
 def check_dead_port():
     # Bind and close, so the port is certainly nobody's.
