@@ -1,5 +1,17 @@
 # Spec gaps
 
+**Current state:** 126 of 854 normative statements are cited by a check. Of the
+remainder, 159 are client-testable and untouched -- that is the real queue, and
+`tools/spec_rules.py` now prints the triage that produces the number. The other
+1,000-odd words of the raw count are requirements binding other interfaces, the
+instrument server, or nothing observable.
+
+Done since this document was first written: VPP-4.3 3.6 (locks), 3.2-3.4
+(resource template), 3.7 (events), 5.1 (required attributes); VXI-11 B.5.3 and
+B.5.4 (operation flags and timeouts), B.6.77; IVI-6.1 3.1.2 (HiSLIP client
+requirements, which needed a message-level injector built first).
+
+
 Hand-written companion to [`spec-coverage.md`](spec-coverage.md), which is
 generated and overwritten by `tools/spec_rules.py`. Nothing here is mechanical,
 so it lives in its own file.

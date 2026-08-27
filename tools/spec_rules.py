@@ -136,6 +136,41 @@ def parse_shall(text: str, spec: str) -> list[dict]:
     return out
 
 
+#: A requirement that binds some other interface entirely -- no TCPIP client
+#: can be held to it.
+OTHER_INTERFACE = re.compile(
+    r"\b(GPIB|USB|PXI|ASRL|serial|VXI backplane|backplane|VME|mainframe|slot|"
+    r"register|SOCKET resource|INTFC|BACKPLANE|SERVANT|MEMACC)\b",
+    re.IGNORECASE,
+)
+#: A requirement on the instrument server rather than on the client.
+SERVER_SIDE = re.compile(r"network instrument server SHALL|the server shall", re.IGNORECASE)
+#: Anything naming an operation, attribute or status code a client can reach.
+CLIENT_TESTABLE = re.compile(
+    r"\bvi[A-Z]\w+|VI_ATTR_|VI_ERROR_|VI_SUCCESS|VI_WARN_|"
+    r"\bclient shall\b|network instrument client SHALL"
+)
+
+
+def triage(rule: dict) -> str:
+    """Which bucket an uncovered requirement falls in.
+
+    The raw count of normative statements badly overstates what a client suite
+    owes: most of VPP-4.3 is about interfaces this suite cannot reach, and much
+    of VXI-11 binds the server. Sorting them is what turns 854 into a queue.
+    """
+    text = rule.get("text", "")
+    if OTHER_INTERFACE.search(text) and not re.search(
+        r"TCPIP|HiSLIP|VXI-11", text, re.IGNORECASE
+    ):
+        return "other interface"
+    if SERVER_SIDE.search(text):
+        return "server-side"
+    if CLIENT_TESTABLE.search(text):
+        return "client-testable"
+    return "prose or definitional"
+
+
 def cited_rules() -> dict[str, list[str]]:
     """Every `rule=` string in the checks, mapped to the checks citing it."""
     cites: dict[str, list[str]] = {}
@@ -212,6 +247,15 @@ def main() -> int:
 
     covered = [r for r in rules if r["covered_by"]]
     print(f"\n{len(rules)} normative statements, {len(covered)} touched by a check")
+    buckets: dict[str, int] = {}
+    for rule in rules:
+        if rule["covered_by"] or rule["kind"] not in ("RULE", "SHALL"):
+            continue
+        bucket = triage(rule)
+        rule["bucket"] = bucket
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+    for bucket, count in sorted(buckets.items(), key=lambda kv: -kv[1]):
+        print(f"    {count:4} uncovered: {bucket}")
     for spec in found_specs:
         s = [r for r in rules if r["spec"] == spec]
         c = [r for r in s if r["covered_by"]]
@@ -245,6 +289,22 @@ def write_report(out: Path, rules, found_specs, cites) -> None:
             f"| {spec} | {SPECS[spec]['title']} | {len(s)} | {len(c)} |"
         )
     lines += [
+        "",
+        "## What is left",
+        "",
+        "The raw count overstates what a client suite owes. Uncovered",
+        "requirements, triaged:",
+        "",
+        "| bucket | count | meaning |",
+        "| --- | --- | --- |",
+        f"| client-testable | {sum(1 for r in rules if r.get('bucket') == 'client-testable')} "
+        "| the actual queue |",
+        f"| prose or definitional | {sum(1 for r in rules if r.get('bucket') == 'prose or definitional')} "
+        "| no single observable behaviour, or defines a term |",
+        f"| other interface | {sum(1 for r in rules if r.get('bucket') == 'other interface')} "
+        "| GPIB, USB, PXI, serial, VXI backplane |",
+        f"| server-side | {sum(1 for r in rules if r.get('bucket') == 'server-side')} "
+        "| binds the instrument server, not the client |",
         "",
         "Coverage is computed from the `rule=` annotations on the checks, so a",
         "check citing no clause counts for nothing here. That is deliberate: the",

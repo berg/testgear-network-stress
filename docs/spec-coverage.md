@@ -13,6 +13,18 @@ by at least one check.
 | VXI-11 | TCP/IP Instrument Protocol Specification | 190 | 40 |
 | IVI-6.1 | HiSLIP | 103 | 17 |
 
+## What is left
+
+The raw count overstates what a client suite owes. Uncovered
+requirements, triaged:
+
+| bucket | count | meaning |
+| --- | --- | --- |
+| client-testable | 159 | the actual queue |
+| prose or definitional | 178 | no single observable behaviour, or defines a term |
+| other interface | 93 | GPIB, USB, PXI, serial, VXI backplane |
+| server-side | 44 | binds the instrument server, not the client |
+
 Coverage is computed from the `rule=` annotations on the checks, so a
 check citing no clause counts for nothing here. That is deliberate: the
 vendor comparison found that every uncited check in its disputed set was
