@@ -53,42 +53,23 @@ RULES: dict[tuple[str, str], dict] = {
             [(r"rsvisa[_-]([0-9.]+)", lambda m: f"R&S VISA {m.group(1)}")], p.name
         ),
     },
-    ("keysight", "windows"): {
-        "match": lambda p: p.suffix.lower() in (".exe", ".msi"),
-        "reject": lambda p: False,
-        # UNVERIFIED. Keysight IO Libraries Suite is an InstallShield-family
-        # bundle and these flags are a guess. Fix them here, or straight in the
-        # bucket's manifest.json -- that is why they are data.
-        "install": {
-            "kind": "exe",
-            "args": ["/quiet", "/norestart"],
-            "success_exit_codes": [0, 3010],
-            "expect_reboot": True,
-            "library": "C:\\Windows\\System32\\ktvisa32.dll",
-            "services": ["Keysight IO Libraries Service"],
-            "verified": False,
-        },
+    ("keysight", "linux"): {
+        "match": lambda p: p.suffix in (".gz", ".tgz", ".deb", ".run"),
+        "reject": lambda p: "arm" in p.name.lower() or "i386" in p.name,
+        # Keysight's Linux build is a package, not a click-through installer,
+        # which is the whole reason this backend moved off Windows: no silent
+        # flags to guess and no reboot to work around.
+        "install": {"kind": "linux-package"},
         "version": lambda p: _first(
-            [(r"(20\d\d)", lambda m: f"Keysight IO Libraries {m.group(1)}")], p.name
-        ),
-    },
-    ("tek", "windows"): {
-        "match": lambda p: p.suffix.lower() in (".exe", ".msi"),
-        "reject": lambda p: False,
-        # UNVERIFIED, as above.
-        "install": {
-            "kind": "exe",
-            "args": ["/S"],
-            "success_exit_codes": [0, 3010],
-            "expect_reboot": True,
-            "library": "C:\\Windows\\System32\\visa32.dll",
-            "verified": False,
-        },
-        "version": lambda p: _first(
-            [(r"([0-9]+\.[0-9.]+)", lambda m: f"TekVISA {m.group(1)}")], p.name
+            [(r"(20\d\d)", lambda m: f"Keysight IO Libraries {m.group(1)}")],
+            p.name,
         ),
     },
 }
+
+#: TekVISA is Windows-only and has no place in a Linux matrix. `backends.py`
+#: still knows about it, so `--backend tek` works for anyone running the suite
+#: by hand on Windows; it is simply not something CI can reach.
 
 
 def _first(patterns, text: str) -> str:
@@ -216,10 +197,7 @@ def main() -> int:
             ),
             install=entry.get("install") or rule["install"],
         )
-        if backend == "ni":
-            entry["dest"] = "vendor/ni/"
-        elif backend == "rs":
-            entry["dest"] = "vendor/rs/"
+        entry["dest"] = f"vendor/{backend}/"
         by_key[(backend, os_name)] = entry
 
         print(f"\n{backend}/{os_name}: {path.name}")

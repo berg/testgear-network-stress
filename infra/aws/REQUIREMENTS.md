@@ -209,12 +209,9 @@ the same `StringEquals`:
   "berg/testgear-network-stress/.github/workflows/_leg-linux.yml@refs/heads/main"
 ```
 
-Only one value is allowed per condition key in `StringEquals`, and there are
-two leg workflows (`_leg-linux.yml`, `_leg-windows.yml`), so this needs either
-`ForAnyValue:StringEquals` with both, or two roles. Worth doing, but do it
-after the simple version is working — and note it must be updated whenever a
-workflow file is renamed, and temporarily widened to a feature branch during
-bring-up.
+There is one leg workflow, so a single value suffices. Worth doing, but after
+the simple version works — and note it must be updated whenever the file is
+renamed, and temporarily widened to a feature branch during bring-up.
 
 ### Permission policy
 

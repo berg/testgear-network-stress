@@ -126,7 +126,7 @@ from having forgotten to install it.
 | `ni` | NI-VISA | vendor installer; macOS, Linux, Windows |
 | `rs` | R&S VISA | vendor installer; macOS, Linux, Windows |
 | `keysight` | Keysight IO Libraries | vendor installer; Linux and Windows only |
-| `tek` | TekVISA | vendor installer; Windows only |
+| `tek` | TekVISA | vendor installer; Windows only, so CI cannot reach it |
 | `sim` | PyVISA-sim | pip; no network, so API shape only |
 
 A backend that is not installed is reported with what to install and where to
@@ -151,7 +151,7 @@ glance a skipped check reads like a passing one.
 | `reproducers/` | One runnable script per open finding, and the original bench diagnostics under `bench/`. |
 | `docs/findings.md` | What this suite has found, and what looked like a finding and was not. |
 | `run_all.py`, `compare.py` | The suite runner and the cross-backend matrix. `run_all.sh` is a shim over the first; both take their script list from `testgear/suite.py`. |
-| `.github/workflows/` | The same runs in CI, one job per implementation, published to Pages. See [`docs/ci.md`](docs/ci.md). |
+| `.github/workflows/` | The same runs in CI, one Linux job per implementation, published to Pages. See [`docs/ci.md`](docs/ci.md). |
 
 ## Reports
 

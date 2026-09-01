@@ -8,7 +8,15 @@ Two workflows, and a rule that holds both of them up.
 | [`full-run.yml`](../.github/workflows/full-run.yml) | every implementation, both transports | GitHub Pages | weekly, `workflow_dispatch` |
 
 Everything else is a reusable workflow the two of them call: `_plan`,
-`_leg-linux`, `_leg-windows`, `_aggregate`, `_publish`.
+`_leg-linux`, `_aggregate`, `_publish`.
+
+**Everything runs Linux.** All four implementations compared -- pyvisa-py,
+NI-VISA, R&S VISA and Keysight IO Libraries -- have 64-bit Linux builds, so
+they run in one image family on one kernel against one mock. A difference
+between two columns is then a difference between two implementations, which is
+the only kind of difference worth publishing. TekVISA is Windows-only and has
+no column; that costs one independent implementation and buys a same-OS
+comparison for the three that remain.
 
 ## What is actually being protected
 
@@ -165,44 +173,31 @@ Four reasons, each sufficient on its own:
    is then a difference between implementations rather than between two
    machines.
 
-The mock server is **not** prebuilt for Linux and injected, for reason 2. It
-*is* prebuilt on Windows, where the target differs anyway and `docs/windows.md`
-already documents `TESTGEAR_MOCK_SERVER` as the skip-the-toolchain route.
-
-## Why pyvisa-py runs on Windows too
-
-Keysight and TekVISA run on Windows against a Windows mock, while pyvisa-py's
-other column runs on Linux. A row where they differ may be differing about the
-*platform*. `04_concurrency`'s descriptor-leak check is the known case: it
-SKIPs on Windows for want of `/dev/fd`.
-
-The Windows pyvisa-py column costs nothing — no driver to install — and gives
-every Windows disagreement a same-OS control. It is the difference between a
-defensible claim and a suggestive one.
-
-For the same reason, "failures unique to PyVISA-py" requires *every* pyvisa-py
-column to fail. One that fails on Linux and passes on Windows is telling you
-about the platform, and does not belong under confirmed findings.
+The mock server is **not** prebuilt and injected, for reason 2: the Dockerfile
+pins it to glibc 2.31 on purpose, and a runner-built binary would undo that.
 
 ## Still unverified
 
-Stated plainly, because none of it has run yet:
+Stated plainly, and kept current -- the list shrinks as things get run.
 
-- **The workflows have never executed.** `actionlint` is clean; that is all.
-- **The container changes have not been built.** There is no Docker on the
-  machine they were written on. `docker/Dockerfile` now expects the tree under
-  test to be *mounted* at `/pyvisa-py` rather than copied in.
-- **Keysight and TekVISA silent installs.** Both are InstallShield-family
-  bundles; the flags in `manifest.json` are placeholders. Verify them by hand
-  on a throwaway Windows VM before trusting those legs, and note that a hosted
-  runner cannot reboot — `install_vendor_windows.py` treats exit 3010 as
-  success and starts the named services, and if the library still will not
-  initialise the leg reports an unavailable column, which is the honest
-  outcome. If unattended install turns out to be impossible, the fallback is a
-  self-hosted Windows runner with the drivers already installed: `runs_on` is
-  a field in `tools/gha_matrix.py` so that is a one-line change. Such a runner
-  must never accept fork-PR jobs — already true, since vendor legs never run
-  on that path.
+What *has* been exercised: the `py` leg end to end on GitHub's runners over
+four runs, the aggregate, the Markdown summary and the baseline gate in both
+directions; and the `py` image built and run under podman, where the mounted
+`/pyvisa-py` tree, the provenance block and the port-111 portmapper bind were
+all confirmed. What has not:
+
+- **No vendor leg has ever run.** The `ni`, `rs` and `keysight` images have
+  never been built, in CI or anywhere else. Podman on the machine they were
+  written on is arm64 and every vendor ships x86-64 Linux only, so the first
+  real exercise of that path is the first `full-run` after this merges.
+- **`full-run.yml` has never executed at all**, because a `workflow_dispatch`
+  workflow has to be on the default branch before it can be dispatched.
+- **The Keysight Linux install step.** Written against what Keysight are known
+  to ship — a tarball with an installer script, loose `.deb`s, or a `.run` —
+  and never run, because the download was not in hand when it was written. It
+  reports which shape it found and lets the run continue either way, so a wrong
+  guess is an unavailable column rather than a failed build. Trim it to the one
+  branch that is actually needed once the real package exists.
 - **`environment: ""`** is used to mean "no environment" for the non-vendor
   legs. Confirm on the first run that a `py` leg is not gated.
 

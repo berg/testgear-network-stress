@@ -41,49 +41,35 @@ R&S also ship a `.tar.gz`; the `.deb` is the one this expects.
 
 ## `keysight/` — Keysight IO Libraries Suite
 
-**Windows.** <https://www.keysight.com/find/iosuite> → the downloads page, and
-take the current **Windows x64 IOLS** build. The licence is free, perpetual and
-needs no activation. Put the `.exe` in `keysight/`.
+**Linux, 64-bit.** <https://www.keysight.com/find/iosuite>. The licence is
+free, perpetual and needs no activation. Put whatever they give you --
+tarball, `.deb`s, or a `.run` -- in `keysight/`.
 
-Two things the download page says that matter here:
+The Linux build is not linked from the main downloads page, which lists Windows
+only; it exists and is worth chasing. It is the reason this suite has no
+Windows CI leg at all. On Linux, Keysight installs into the same container as
+NI and R&S, so all four implementations run on one kernel against one mock --
+and every finding in `docs/findings.md` rests on vendor agreement, where three
+implementations agreeing on the same OS is a stronger claim than two agreeing
+across a platform boundary.
 
-- *"For best interoperability with NI-VISA, it is recommended to install
-  NI-VISA first."* Irrelevant for CI, where each backend gets its own fresh
-  runner — and that separation is deliberate, see the preferred-VISA trap in
-  [`../docs/windows.md`](../docs/windows.md).
-- The 2026 release is listed for Windows only. Keysight document a Linux build
-  (64-bit only) and this suite knows where to look for it —
-  `/opt/keysight/iolibs/libktvisa32.so` — but there is **no Linux download
-  linked from that page**, so getting one may mean asking Keysight. Worth the
-  ask: see the note below.
+The install step in `docker/Dockerfile` is written against what Keysight are
+known to ship and is **unverified**. It accepts a tarball with an installer
+script, loose `.deb`s, or a `.run`, and says which it found; once the real
+download is in hand, delete the branches it did not need.
 
-## `tek/` — TekVISA
+## TekVISA is not here
 
-**Windows only**, genuinely — there is no Linux or macOS build.
+TekVISA is Windows-only, and everything CI runs is Linux, so it has no column.
+`backends.py` still knows about it -- `--backend tek` works for anyone running
+the suite by hand on Windows, see [`../docs/windows.md`](../docs/windows.md) --
+but nothing automated can reach it.
 
-<https://www.tek.com/en/support/software/driver/tekvisa-connectivity-software-v411>
-→ `OpenChoice_TekVisa_Deployment_Package_066093811.exe`, about 100 MB, 64-bit.
-
-Downloading needs a completed Tektronix profile (name, address, organisation)
-and acceptance of the licence, and **the approval can take up to one business
-day** — so start this one first if you are collecting all four.
-
-## Worth asking Keysight for the Linux build
-
-The Windows legs are the awkward part of this whole arrangement: the
-silent-install flags are unverified, a hosted runner cannot reboot, and
-`tek` resolves to the generic `visa32.dll` shim rather than a
-Tektronix-specific library.
-
-Keysight is the one vendor that could sidestep all of that, because it is the
-only one of the two with a Linux build. On Linux it would install into the same
-container as NI and R&S, which means no silent-install guesswork, no reboot
-question, and — the real prize — a **third vendor column on the same OS as the
-other two**. Every finding in `docs/findings.md` rests on vendor agreement, and
-agreement between three implementations on one kernel is a stronger claim than
-agreement between two.
-
-TekVISA cannot move; it is Windows or nothing.
+That is a real cost, honestly stated: it is one fewer independent
+implementation. It is outweighed by what dropping Windows buys, which is that
+the three vendors that remain are compared on the same kernel rather than two
+of them on Linux and one across an OS boundary where a disagreement might
+be about the platform.
 
 ## What happens next
 

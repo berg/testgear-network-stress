@@ -353,9 +353,18 @@ Reproduce:
 
 ### HiSLIP reconnection fails partway through open/close churn, on Windows
 
-**Status:** open, **side not yet determined**. Reproduced on every CI run that
-has exercised it -- three of three -- on `windows-latest`, over HiSLIP, against
-upstream `main` (`3cc4fe9`).
+**Status:** open, **side not yet determined, and no longer exercised**.
+Reproduced on every CI run that saw it -- three of three -- on
+`windows-latest`, over HiSLIP, against upstream `main` (`3cc4fe9`).
+
+CI has since dropped Windows entirely: Keysight turned out to have a Linux
+build, which left TekVISA as the only reason to run there, and one Windows-only
+vendor did not justify the platform. So nothing reproduces this automatically
+any more. It is kept rather than retracted because it was seen three times out
+of three and stopped at the same cycle count twice, which is not the shape of a
+flake -- but it will not be settled by waiting, and the next person to run
+`04_concurrency` on Windows by hand is who settles it. See
+[`windows.md`](windows.md).
 
 `04_concurrency` ends by opening and closing the same resource twenty times,
 checking that threads and descriptors are reclaimed. On Windows the HiSLIP
@@ -386,12 +395,14 @@ the right neighbourhood by the seventh cycle if the earlier ones are not being
 reaped.
 
 That makes the mock the leading suspect, and this suite brings its own
-instrument precisely so that question gets asked. It is **not** yet settled:
-the arithmetic is suggestive rather than exact, and confirming it needs the
-server's own log, which the leg does not currently capture. Two things would
-settle it -- capturing the mock's stderr from a Windows leg, and running the
-same churn against a vendor VISA on the same host. If Keysight churns cleanly
-where pyvisa-py does not, the limit is not the explanation.
+instrument precisely so that question gets asked. It is **not** settled: the
+arithmetic is suggestive rather than exact.
+
+It is also cheap to settle by hand, and does not need Windows to *disprove*.
+Raise `max_sessions` in `server/src/hislip/server.rs`, or add a log line where
+the cap is hit, and re-run `04_concurrency --protocol hislip` on Windows. If
+the churn gets further, the mock is the answer and the fix is ours. If it still
+stops at seven, the cap is a red herring and the client is back in the frame.
 
 The transport asymmetry is the useful part, because it holds *within a single
 run on a single machine*:

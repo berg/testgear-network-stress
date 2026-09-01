@@ -1,9 +1,18 @@
-# Running on Windows (Keysight, TekVISA)
+# Running on Windows (TekVISA)
 
-Keysight IO Libraries and TekVISA are the two implementations this suite
-cannot reach from macOS or Linux containers, and both are worth having: every
-finding so far rests on two vendor implementations agreeing, and a third
-independent one is the cheapest way to harden that.
+**CI does not do this.** Every leg runs Linux, because all four implementations
+CI compares -- pyvisa-py, NI, R&S and Keysight -- have 64-bit Linux builds, and
+running them on one kernel means a difference between two columns is a
+difference between two implementations rather than between two machines. See
+[`ci.md`](ci.md).
+
+What is left here is TekVISA, which is Windows or nothing, and running the
+suite on Windows by hand -- which is worth doing occasionally on its own
+account, since plenty of people drive pyvisa-py from Windows.
+
+Keysight used to be the other reason for this page. It has a Linux build, so it
+moved into the container with the rest; see
+[`../vendor/README.md`](../vendor/README.md).
 
 ## Setup
 
@@ -44,18 +53,20 @@ uv run python run_all.py --backend keysight --reports reports-keysight
 their script list from `testgear/suite.py`, so no bash is required and the two
 cannot drift.
 
-## In CI
+## Set TESTGEAR_PORTMAP explicitly
 
-`.github/workflows/_leg-windows.yml` does all of the above on a
-`windows-latest` runner: builds the mock, installs the driver from the private
-store, probes it, and runs both transports. It sets `TESTGEAR_PORTMAP=1`
-explicitly rather than letting the probe decide -- if 111 ever stops being
-bindable there, that should be a hard failure rather than a silent fall back to
-a resource name only pyvisa-py accepts.
+Windows imposes no privileged-port restriction, so the portmapper binds 111
+without administrator rights -- which is what gets you the standard VXI-11
+resource name that vendor implementations accept. Pin it rather than letting
+the probe decide:
 
-The silent-install arguments live in the store's `manifest.json` and are
-**unverified**; see [`ci.md`](ci.md). Verifying them on a throwaway VM, once,
-is the thing that unblocks those two columns.
+```powershell
+$env:TESTGEAR_PORTMAP = "1"
+```
+
+Without it a run can quietly fall back to `TCPIP0::host,port::inst0::INSTR`,
+which is a pyvisa-py-only extension, and the whole transport then looks
+unsupported to any vendor library.
 
 ## Folding the results in
 

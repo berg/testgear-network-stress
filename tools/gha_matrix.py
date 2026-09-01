@@ -38,12 +38,16 @@ from testgear import backends  # noqa: E402
 #: `vendor` is the gate: a leg with vendor=True needs a non-redistributable
 #: installer, so it only ever runs where an AWS role is reachable, which is
 #: never on the pull_request path.
+#:
+#: Every leg is Linux, and that is the point rather than a limitation. All four
+#: implementations run in the same image family, on the same kernel, against
+#: the same mock -- so a difference between two columns is a difference between
+#: two implementations and not between two machines. Keysight ships a 64-bit
+#: Linux build, which is what makes a third vendor column possible here;
+#: TekVISA does not, and is left to whoever runs it by hand.
 LEGS: tuple[dict, ...] = (
     {"id": "linux-py", "backend": "py", "runner": "linux",
      "runs_on": "ubuntu-latest", "image": "py", "os_label": "Linux",
-     "vendor": False, "full_only": False},
-    {"id": "win-py", "backend": "py", "runner": "windows",
-     "runs_on": "windows-latest", "os_label": "Windows",
      "vendor": False, "full_only": False},
     {"id": "linux-ni", "backend": "ni", "runner": "linux",
      "runs_on": "ubuntu-latest", "image": "ni", "os_label": "Linux",
@@ -51,11 +55,8 @@ LEGS: tuple[dict, ...] = (
     {"id": "linux-rs", "backend": "rs", "runner": "linux",
      "runs_on": "ubuntu-latest", "image": "rs", "os_label": "Linux",
      "vendor": True, "full_only": True},
-    {"id": "win-keysight", "backend": "keysight", "runner": "windows",
-     "runs_on": "windows-latest", "os_label": "Windows",
-     "vendor": True, "full_only": True},
-    {"id": "win-tek", "backend": "tek", "runner": "windows",
-     "runs_on": "windows-latest", "os_label": "Windows",
+    {"id": "linux-keysight", "backend": "keysight", "runner": "linux",
+     "runs_on": "ubuntu-latest", "image": "keysight", "os_label": "Linux",
      "vendor": True, "full_only": True},
 )
 
@@ -91,13 +92,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--runner",
-        choices=("linux", "windows"),
+        choices=("linux",),
         help="only the legs for one runner OS",
     )
     parser.add_argument(
         "--github-output",
         action="store_true",
-        help="append legs/linux-legs/windows-legs to $GITHUB_OUTPUT",
+        help="append legs and linux-legs to $GITHUB_OUTPUT",
     )
     args = parser.parse_args()
 
@@ -117,7 +118,6 @@ def main() -> int:
         for name, subset in (
             ("legs", legs),
             ("linux-legs", [l for l in legs if l["runner"] == "linux"]),
-            ("windows-legs", [l for l in legs if l["runner"] == "windows"]),
         ):
             handle.write(f"{name}={json.dumps(subset)}\n")
     print(json.dumps(legs, indent=2))

@@ -17,8 +17,6 @@ on:
         value: ${{ jobs.plan.outputs.legs }}
       linux-legs:
         value: ${{ jobs.plan.outputs.linux-legs }}
-      windows-legs:
-        value: ${{ jobs.plan.outputs.windows-legs }}
 
 permissions:
   contents: read
@@ -30,7 +28,6 @@ jobs:
     outputs:
       legs: ${{ steps.legs.outputs.legs }}
       linux-legs: ${{ steps.legs.outputs.linux-legs }}
-      windows-legs: ${{ steps.legs.outputs.windows-legs }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

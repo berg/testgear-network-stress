@@ -56,26 +56,8 @@ jobs:
       environment: ${{ matrix.leg.vendor && 'vendor-drivers' || '' }}
 
 
-  windows:
-    # Named, or the job appears in the UI as every field of the leg descriptor
-    # comma-joined and truncated mid-word.
-    name: ${{ matrix.leg.id }}
-    needs: [plan]
-    if: needs.plan.outputs.windows-legs != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        leg: ${{ fromJSON(needs.plan.outputs.windows-legs) }}
-    uses: ./.github/workflows/_leg-windows.yml
-    with:
-      leg: ${{ toJSON(matrix.leg) }}
-      pyvisa-py-repo: pyvisa/pyvisa-py
-      pyvisa-py-ref: main
-      pyvisa-ref: main
-      environment: ${{ matrix.leg.vendor && 'vendor-drivers' || '' }}
-
   aggregate:
-    needs: [plan, linux, windows]
+    needs: [plan, linux]
     # always(), so a leg that died still gets reported as a column -- but not
     # when the plan itself failed, because then there is no list of legs to
     # report against and the failure to look at is two jobs upstream.

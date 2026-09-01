@@ -119,6 +119,50 @@ RUN set -eux; \
     apt-get install -y -f --no-install-recommends || true; \
     rm -rf /var/lib/apt/lists/*
 
+# -- Keysight IO Libraries --------------------------------------------------
+# The third vendor column, and the reason there is no Windows leg: Keysight is
+# the only one of the two Windows-capable implementations with a 64-bit Linux
+# build, so it can be compared against NI and R&S on the same kernel instead of
+# across an OS boundary.
+#
+# UNVERIFIED. Keysight do not publish a single canonical Linux artefact, so
+# this accepts what they are known to ship -- a tarball with an installer
+# script inside, loose .deb packages, or a .run -- and says which one it found.
+# When the real download is in hand, delete the branches it did not need.
+RUN set -eux; \
+    if [ "$BACKEND" != "keysight" ]; then echo "not a Keysight image, skipping"; exit 0; fi; \
+    if [ ! -d /vendor/keysight ] || [ -z "$(ls -A /vendor/keysight 2>/dev/null)" ]; then \
+        echo "NO KEYSIGHT PACKAGE IN vendor/keysight -- the image builds and the run reports it missing"; \
+        exit 0; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends build-essential libtirpc-dev; \
+    mkdir -p /tmp/ks; \
+    for archive in /vendor/keysight/*.tar.gz /vendor/keysight/*.tgz; do \
+        [ -e "$archive" ] || continue; \
+        echo "unpacking $archive"; tar -xzf "$archive" -C /tmp/ks; \
+    done; \
+    cp /vendor/keysight/*.deb /tmp/ks/ 2>/dev/null || true; \
+    cp /vendor/keysight/*.run /tmp/ks/ 2>/dev/null || true; \
+    installer=$(find /tmp/ks -maxdepth 3 -name "*.run" -o -maxdepth 3 -name "install*" -type f | head -1 || true); \
+    if ls /tmp/ks/*.deb >/dev/null 2>&1; then \
+        echo "installing Keysight .deb packages"; \
+        dpkg -i /tmp/ks/*.deb || apt-get install -y -f --no-install-recommends; \
+    elif [ -n "$installer" ]; then \
+        echo "running Keysight installer: $installer"; \
+        chmod +x "$installer"; \
+        # Their installer is interactive by default; this is the flag that has
+        # to be confirmed against the real download.
+        "$installer" --silent || "$installer" -q || "$installer"; \
+    else \
+        echo "NOTHING INSTALLABLE IN vendor/keysight -- the run will report it missing"; \
+        ls -laR /tmp/ks || true; \
+        exit 0; \
+    fi; \
+    ldconfig || true; \
+    rm -rf /var/lib/apt/lists/* /tmp/ks
+
+
 # -- python -----------------------------------------------------------------
 # pyvisa from pip, or from a git ref when a run wants to test what is current
 # rather than what is released.
