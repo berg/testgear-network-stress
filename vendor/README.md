@@ -39,6 +39,52 @@ well travelled, and the container base is ours to choose.
 
 R&S also ship a `.tar.gz`; the `.deb` is the one this expects.
 
+## `keysight/` — Keysight IO Libraries Suite
+
+**Windows.** <https://www.keysight.com/find/iosuite> → the downloads page, and
+take the current **Windows x64 IOLS** build. The licence is free, perpetual and
+needs no activation. Put the `.exe` in `keysight/`.
+
+Two things the download page says that matter here:
+
+- *"For best interoperability with NI-VISA, it is recommended to install
+  NI-VISA first."* Irrelevant for CI, where each backend gets its own fresh
+  runner — and that separation is deliberate, see the preferred-VISA trap in
+  [`../docs/windows.md`](../docs/windows.md).
+- The 2026 release is listed for Windows only. Keysight document a Linux build
+  (64-bit only) and this suite knows where to look for it —
+  `/opt/keysight/iolibs/libktvisa32.so` — but there is **no Linux download
+  linked from that page**, so getting one may mean asking Keysight. Worth the
+  ask: see the note below.
+
+## `tek/` — TekVISA
+
+**Windows only**, genuinely — there is no Linux or macOS build.
+
+<https://www.tek.com/en/support/software/driver/tekvisa-connectivity-software-v411>
+→ `OpenChoice_TekVisa_Deployment_Package_066093811.exe`, about 100 MB, 64-bit.
+
+Downloading needs a completed Tektronix profile (name, address, organisation)
+and acceptance of the licence, and **the approval can take up to one business
+day** — so start this one first if you are collecting all four.
+
+## Worth asking Keysight for the Linux build
+
+The Windows legs are the awkward part of this whole arrangement: the
+silent-install flags are unverified, a hosted runner cannot reboot, and
+`tek` resolves to the generic `visa32.dll` shim rather than a
+Tektronix-specific library.
+
+Keysight is the one vendor that could sidestep all of that, because it is the
+only one of the two with a Linux build. On Linux it would install into the same
+container as NI and R&S, which means no silent-install guesswork, no reboot
+question, and — the real prize — a **third vendor column on the same OS as the
+other two**. Every finding in `docs/findings.md` rests on vendor agreement, and
+agreement between three implementations on one kernel is a stronger claim than
+agreement between two.
+
+TekVISA cannot move; it is Windows or nothing.
+
 ## What happens next
 
 ```bash

@@ -137,10 +137,29 @@ def main() -> int:
         help="say what would be uploaded and write the manifest locally",
     )
     parser.add_argument(
+        "--vendor-version",
+        action="append",
+        default=[],
+        metavar="BACKEND=VERSION",
+        help="state a version the filename does not carry, e.g. "
+        "--vendor-version 'keysight=Keysight IO Libraries 2026'. It is what "
+        "the published page labels the column with, so a wrong one is a page "
+        "that names the wrong library",
+    )
+    parser.add_argument(
         "--manifest-out",
         help="also write the manifest here, for review before it goes up",
     )
     args = parser.parse_args()
+
+    overrides: dict[str, str] = {}
+    for pair in args.vendor_version:
+        backend, _, version = pair.partition("=")
+        if not version:
+            print(f"--vendor-version wants BACKEND=VERSION, got {pair!r}",
+                  file=sys.stderr)
+            return 4
+        overrides[backend] = version
 
     root = Path(args.root)
     if not root.is_dir():
@@ -190,7 +209,11 @@ def main() -> int:
             key=key,
             sha256=sha,
             bytes=size,
-            vendor_version=entry.get("vendor_version") or rule["version"](path),
+            vendor_version=(
+                overrides.get(backend)
+                or entry.get("vendor_version")
+                or rule["version"](path)
+            ),
             install=entry.get("install") or rule["install"],
         )
         if backend == "ni":
