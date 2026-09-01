@@ -102,7 +102,13 @@ and:
 
 It syncs the suite and the pyvisa-py tree under test to `$TESTGEAR_HOST`
 (default `slopbox`), builds one container image per implementation, runs the
-checks inside each, collects the JSON reports and renders the matrix.
+checks inside each, collects the JSON reports and renders the matrix. The tree
+under test is mounted rather than built into the image, so a new commit does
+not invalidate the layer that pulls a gigabyte from ni.com.
+
+The same containers are what CI runs, one implementation per job, publishing
+the matrix to GitHub Pages -- see [`docs/ci.md`](docs/ci.md). `remote-compare.sh`
+stays as the offline route.
 
 pyvisa-py's own column is produced **in the same container** rather than on the
 local machine. Running it here would compare a Linux VISA against a macOS one
@@ -144,7 +150,8 @@ glance a skipped check reads like a passing one.
 | `checks/` | The checks themselves: nine numbered scripts plus two conformance suites. |
 | `reproducers/` | One runnable script per open finding, and the original bench diagnostics under `bench/`. |
 | `docs/findings.md` | What this suite has found, and what looked like a finding and was not. |
-| `run_all.sh`, `compare.py` | The suite runner and the cross-backend matrix. |
+| `run_all.py`, `compare.py` | The suite runner and the cross-backend matrix. `run_all.sh` is a shim over the first; both take their script list from `testgear/suite.py`. |
+| `.github/workflows/` | The same runs in CI, one job per implementation, published to Pages. See [`docs/ci.md`](docs/ci.md). |
 
 ## Reports
 

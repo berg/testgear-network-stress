@@ -20,6 +20,17 @@ makes VXI-11 easier to exercise there than on a developer Mac.
    present, so `visa32.dll` keeps pointing where you expect; this suite loads
    `ktvisa32.dll` by name and does not care which is preferred.
 
+**That advice is exactly wrong for TekVISA.** `tek` resolves to
+`C:\Windows\System32\visa32.dll`, which is the *generic* VISA shim, not a
+Tektronix-specific library -- so what it points at is decided by whichever
+implementation won the "preferred VISA" argument. On a machine with both,
+`--backend tek` may quietly measure Keysight and report it under Tektronix's
+name.
+
+So keep the two on separate machines. CI does this by construction: the matrix
+gives `keysight` and `tek` their own fresh runners, and that must never be
+optimised into one job.
+
 Then, from a checkout:
 
 ```powershell
@@ -29,8 +40,22 @@ cargo build --release --manifest-path server\Cargo.toml
 uv run python run_all.py --backend keysight --reports reports-keysight
 ```
 
-`run_all.py` is the cross-platform equivalent of `run_all.sh` -- same scripts,
-same order, same exit status -- so no bash is required.
+`run_all.py` is the sweep itself; `run_all.sh` is now a shim over it. Both take
+their script list from `testgear/suite.py`, so no bash is required and the two
+cannot drift.
+
+## In CI
+
+`.github/workflows/_leg-windows.yml` does all of the above on a
+`windows-latest` runner: builds the mock, installs the driver from the private
+store, probes it, and runs both transports. It sets `TESTGEAR_PORTMAP=1`
+explicitly rather than letting the probe decide -- if 111 ever stops being
+bindable there, that should be a hard failure rather than a silent fall back to
+a resource name only pyvisa-py accepts.
+
+The silent-install arguments live in the store's `manifest.json` and are
+**unverified**; see [`ci.md`](ci.md). Verifying them on a throwaway VM, once,
+is the thing that unblocks those two columns.
 
 ## Folding the results in
 
