@@ -56,12 +56,28 @@ RULES: dict[tuple[str, str], dict] = {
     ("keysight", "linux"): {
         "match": lambda p: p.suffix in (".gz", ".tgz", ".deb", ".run"),
         "reject": lambda p: "arm" in p.name.lower() or "i386" in p.name,
-        # Keysight's Linux build is a package, not a click-through installer,
-        # which is the whole reason this backend moved off Windows: no silent
-        # flags to guess and no reboot to work around.
-        "install": {"kind": "linux-package"},
+        # A record of what docker/Dockerfile does with it, not something read
+        # back at build time -- the Dockerfile installs this one itself. Kept
+        # here so the bucket says what the flags are without needing the repo.
+        "install": {
+            "kind": "bitrock-run",
+            "args": ["--mode", "unattended", "--unattendedmodeui", "none"],
+            "enable_components": "iio,iom,lan,interfaces",
+            "library": "/opt/keysight/iolibs/libktvisa32.so",
+            "applied_by": "docker/Dockerfile",
+        },
+        # IOLibrariesSuite-21.3.94-linux-x64.run. The marketing year (2026)
+        # is not in the filename -- `--version` reports "Keysight IO Libraries
+        # Suite 2026 21.3.94" -- so record the build, which is the part that
+        # identifies what actually ran.
         "version": lambda p: _first(
-            [(r"(20\d\d)", lambda m: f"Keysight IO Libraries {m.group(1)}")],
+            [
+                (
+                    r"IOLibrariesSuite-([0-9][0-9.]*)-",
+                    lambda m: f"Keysight IO Libraries {m.group(1)}",
+                ),
+                (r"(20\d\d)", lambda m: f"Keysight IO Libraries {m.group(1)}"),
+            ],
             p.name,
         ),
     },

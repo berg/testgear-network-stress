@@ -122,45 +122,42 @@ RUN set -eux; \
 # -- Keysight IO Libraries --------------------------------------------------
 # The third vendor column, and the reason there is no Windows leg: Keysight is
 # the only one of the two Windows-capable implementations with a 64-bit Linux
-# build, so it can be compared against NI and R&S on the same kernel instead of
-# across an OS boundary.
+# build, so it can be compared against NI and R&S on the same kernel rather
+# than across an OS boundary where a disagreement might be about the platform.
 #
-# UNVERIFIED. Keysight do not publish a single canonical Linux artefact, so
-# this accepts what they are known to ship -- a tarball with an installer
-# script inside, loose .deb packages, or a .run -- and says which one it found.
-# When the real download is in hand, delete the branches it did not need.
+# The download is a BitRock InstallBuilder self-extractor -- an ELF binary, not
+# a shell script, so its options are not readable with `strings`. They came
+# from running `--help`:
+#
+#   --mode           gtk | xwindow | text | unattended   (default gtk)
+#   --unattendedmodeui none | minimal | minimalWithDialogs
+#   --enable-components / --disable-components
+#
+# `--mode unattended` is the one that matters; the default is a GTK dialog,
+# which in a build would simply hang.
 RUN set -eux; \
     if [ "$BACKEND" != "keysight" ]; then echo "not a Keysight image, skipping"; exit 0; fi; \
-    if [ ! -d /vendor/keysight ] || [ -z "$(ls -A /vendor/keysight 2>/dev/null)" ]; then \
-        echo "NO KEYSIGHT PACKAGE IN vendor/keysight -- the image builds and the run reports it missing"; \
+    run=$(ls /vendor/keysight/*.run 2>/dev/null | head -1 || true); \
+    if [ -z "$run" ]; then \
+        echo "NO KEYSIGHT .run IN vendor/keysight -- the image builds and the run reports it missing"; \
+        ls -la /vendor/keysight 2>/dev/null || true; \
         exit 0; \
     fi; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends build-essential libtirpc-dev; \
-    mkdir -p /tmp/ks; \
-    for archive in /vendor/keysight/*.tar.gz /vendor/keysight/*.tgz; do \
-        [ -e "$archive" ] || continue; \
-        echo "unpacking $archive"; tar -xzf "$archive" -C /tmp/ks; \
-    done; \
-    cp /vendor/keysight/*.deb /tmp/ks/ 2>/dev/null || true; \
-    cp /vendor/keysight/*.run /tmp/ks/ 2>/dev/null || true; \
-    installer=$(find /tmp/ks -maxdepth 3 -name "*.run" -o -maxdepth 3 -name "install*" -type f | head -1 || true); \
-    if ls /tmp/ks/*.deb >/dev/null 2>&1; then \
-        echo "installing Keysight .deb packages"; \
-        dpkg -i /tmp/ks/*.deb || apt-get install -y -f --no-install-recommends; \
-    elif [ -n "$installer" ]; then \
-        echo "running Keysight installer: $installer"; \
-        chmod +x "$installer"; \
-        # Their installer is interactive by default; this is the flag that has
-        # to be confirmed against the real download.
-        "$installer" --silent || "$installer" -q || "$installer"; \
-    else \
-        echo "NOTHING INSTALLABLE IN vendor/keysight -- the run will report it missing"; \
-        ls -laR /tmp/ks || true; \
-        exit 0; \
-    fi; \
+    echo "Keysight installer: $run"; \
+    cp "$run" /tmp/iols.run; \
+    chmod +x /tmp/iols.run; \
+    /tmp/iols.run --version || true; \
+    # Only what a TCPIP run needs. The GPIB and PXI components want kernel
+    # modules a container cannot load -- the same wall NI hits -- and the GUIs
+    # want a display. Asking for them would turn a working VISA into a failed
+    # install for reasons that have nothing to do with what is being measured.
+    /tmp/iols.run --mode unattended --unattendedmodeui none \
+        --enable-components iio,iom,lan,interfaces \
+        || /tmp/iols.run --mode unattended --unattendedmodeui none; \
+    rm -f /tmp/iols.run; \
     ldconfig || true; \
-    rm -rf /var/lib/apt/lists/* /tmp/ks
+    echo "installed Keysight libraries:"; \
+    find / -name "libktvisa32.so*" 2>/dev/null | head || true
 
 
 # -- python -----------------------------------------------------------------

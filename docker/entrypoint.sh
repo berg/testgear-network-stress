@@ -72,7 +72,9 @@ for candidate in \
     /usr/local/vxipnp/linux/lib64/libvisa.so \
     /usr/lib/x86_64-linux-gnu/librsvisa.so \
     /usr/lib/librsvisa.so \
-    /usr/local/lib/librsvisa.so
+    /usr/local/lib/librsvisa.so \
+    /opt/keysight/iolibs/libktvisa32.so \
+    /usr/lib/libktvisa32.so
 do
     if [[ -e "$candidate" ]]; then
         echo "  $candidate -> $(readlink -f "$candidate")"
@@ -84,6 +86,15 @@ done
 if [[ "$BACKEND" == "ni" ]]; then
     banner "NI runtime"
     start_ni_daemons
+fi
+
+# Keysight answers pyvisa's get_library_paths() with an empty tuple, so the
+# probe below cannot report its version the way it does for the others. The
+# installer leaves one behind; read it, so the report can name what it ran
+# against rather than leaving the column unlabelled.
+if [[ "$BACKEND" == "keysight" ]] && [[ -r /opt/keysight/iolibs/version.txt ]]; then
+    banner "Keysight version"
+    echo "  IO Libraries $(cat /opt/keysight/iolibs/version.txt)"
 fi
 
 banner "does the backend load?"

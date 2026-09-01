@@ -55,13 +55,12 @@ jobs:
       # through the OIDC subject rather than only by this file.
       environment: ${{ matrix.leg.vendor && 'vendor-drivers' || '' }}
 
-
   aggregate:
     needs: [plan, linux]
     # always(), so a leg that died still gets reported as a column -- but not
     # when the plan itself failed, because then there is no list of legs to
     # report against and the failure to look at is two jobs upstream.
-    if: always() && needs.plan.result == 'success' 
+    if: always() && needs.plan.result == 'success'
     uses: ./.github/workflows/_aggregate.yml
     with:
       plan: ${{ needs.plan.outputs.legs }}
