@@ -42,6 +42,9 @@ jobs:
       run-type: pyvisa-py
 
   linux:
+    # Named, or the job appears in the UI as every field of the leg descriptor
+    # comma-joined and truncated mid-word.
+    name: ${{ matrix.leg.id }}
     needs: [plan]
     if: needs.plan.outputs.linux-legs != '[]'
     strategy:
@@ -56,6 +59,9 @@ jobs:
 
 
   windows:
+    # Named, or the job appears in the UI as every field of the leg descriptor
+    # comma-joined and truncated mid-word.
+    name: ${{ matrix.leg.id }}
     needs: [plan]
     if: needs.plan.outputs.windows-legs != '[]'
     strategy:

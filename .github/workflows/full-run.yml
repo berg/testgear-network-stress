@@ -36,6 +36,9 @@ jobs:
       run-type: full
 
   linux:
+    # Named, or the job appears in the UI as every field of the leg descriptor
+    # comma-joined and truncated mid-word.
+    name: ${{ matrix.leg.id }}
     needs: [plan]
     strategy:
       fail-fast: false
@@ -54,6 +57,9 @@ jobs:
 
 
   windows:
+    # Named, or the job appears in the UI as every field of the leg descriptor
+    # comma-joined and truncated mid-word.
+    name: ${{ matrix.leg.id }}
     needs: [plan]
     if: needs.plan.outputs.windows-legs != '[]'
     strategy:
