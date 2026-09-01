@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Pull every leg's artifact together, normalise it, and render the page and the
+# Markdown. Runs with `if: always()` from the caller, because a leg that died
+# is exactly the thing this has to report.
+name: aggregate
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The legs JSON, so a leg that produced nothing still gets a column
+        type: string
+        required: true
+      title:
+        type: string
+        default: VISA Conformance Matrix
+      subtitle:
+        type: string
+        default: ""
+      page-url:
+        type: string
+        default: ""
+      gate:
+        description: Fail the run on a regression against docs/ci-baseline.json
+        type: boolean
+        default: true
+      pages:
+        description: Also upload the site as a Pages artifact, for a deploy job
+        type: boolean
+        default: false
+    outputs:
+      verdict:
+        value: ${{ jobs.aggregate.outputs.verdict }}
+
+permissions:
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      verdict: ${{ steps.verdict.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect the legs
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: reports-*
+
+      - name: What turned up
+        run: |
+          echo "$PLAN" > plan.json
+          ls -la artifacts/ || echo "(no artifacts at all)"
+        env:
+          PLAN: ${{ inputs.plan }}
+
+      # The index is built from the plan, not from what turned up. A leg that
+      # was meant to run and produced nothing gets a column carrying its
+      # reason -- a table with a column silently absent reads like agreement
+      # between the implementations that remain.
+      - name: Normalise into columns
+        run: |
+          python tools/normalise_reports.py \
+            --in artifacts --out site/columns --plan plan.json \
+            --raw site/reports
+
+      - name: Render the page
+        run: |
+          reports=()
+          for proto in hislip vxi11; do
+            if [[ -f "site/columns/$proto/index.json" ]]; then
+              reports+=("$proto=site/columns/$proto")
+            fi
+          done
+          if [[ ${#reports[@]} -eq 0 ]]; then
+            echo "::error::no columns were produced by any leg"
+            exit 1
+          fi
+          python tools/artifact_matrix.py \
+            --full-page --out site/index.html --reports "${reports[@]}"
+
+      - name: Render the Markdown
+        run: |
+          python tools/markdown_summary.py \
+            --columns site/columns \
+            --out site/summary.md \
+            --step-summary step-summary.md \
+            --title "${{ inputs.title }}" \
+            --subtitle "${{ inputs.subtitle }}" \
+            --page-url "${{ inputs.page-url }}"
+          cat step-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verdict
+        id: verdict
+        run: |
+          gate=--gate-subject
+          [[ "${{ inputs.gate }}" == "true" ]] || gate=--no-gate-subject
+          python tools/ci_status.py --columns site/columns "$gate"
+
+      - name: Upload the site
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site/
+          retention-days: 30
+
+      - name: Upload for Pages
+        if: always() && inputs.pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/

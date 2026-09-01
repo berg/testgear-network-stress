@@ -1,0 +1,166 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# One Windows leg.
+#
+# Windows earns its place twice. Keysight IO Libraries and TekVISA ship the two
+# implementations this suite cannot reach any other way, and every finding so
+# far rests on two vendor implementations agreeing -- a third independent one
+# is the cheapest way to harden that.
+#
+# And pyvisa-py itself runs here, with no driver to install. That column is not
+# padding: Keysight and Tek run on Windows against a Windows mock while
+# pyvisa-py's other column runs on Linux, so a row where they differ may be
+# differing about the platform. A same-OS control is what turns a suggestive
+# disagreement into a defensible one. 04_concurrency's descriptor-leak check is
+# the known case -- it SKIPs here for want of /dev/fd.
+name: windows leg
+
+on:
+  workflow_call:
+    inputs:
+      leg:
+        type: string
+        required: true
+      pyvisa-py-repo:
+        type: string
+        default: pyvisa/pyvisa-py
+      pyvisa-py-ref:
+        type: string
+        default: main
+      pyvisa-ref:
+        type: string
+        default: ""
+      environment:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  leg:
+    runs-on: ${{ fromJSON(inputs.leg).runs_on }}
+    timeout-minutes: 90
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install what the run needs
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check boto3
+          if [[ -n "${{ inputs.pyvisa-ref }}" ]]; then
+            python -m pip install "git+https://github.com/pyvisa/pyvisa@${{ inputs.pyvisa-ref }}"
+          else
+            python -m pip install pyvisa
+          fi
+
+      - name: Clone the pyvisa-py under test
+        shell: bash
+        run: |
+          git clone --filter=blob:none \
+            "https://github.com/${{ inputs.pyvisa-py-repo }}" pyvisa-py
+          git -C pyvisa-py checkout --detach "${{ inputs.pyvisa-py-ref }}"
+          git -C pyvisa-py --no-pager log -1 --oneline
+
+      # -- the mock server --------------------------------------------------
+      # Built here rather than shipped from Linux: it is a native binary and
+      # the target differs. The cache holds no vendor bits, so a public cache
+      # is fine -- which is not true of anything a vendor leg builds.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Build the mock server
+        shell: bash
+        run: cargo build --release --manifest-path server/Cargo.toml
+
+      # -- the vendor driver, for the legs that need one --------------------
+      - name: Assume the vendor-read role
+        if: fromJSON(inputs.leg).vendor
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+
+      - name: Fetch and install the vendor driver
+        id: driver
+        if: fromJSON(inputs.leg).vendor
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          python tools/fetch_vendor.py \
+            --backend "${{ fromJSON(inputs.leg).backend }}" \
+            --os windows \
+            --bucket "${{ vars.VENDOR_BUCKET }}" \
+            --into vendor/ \
+            --print-install install.json
+          rc=$?
+          [[ $rc -eq 3 ]] && { echo "not provisioned"; exit 1; }
+          [[ $rc -ne 0 ]] && exit 1
+          python tools/install_vendor_windows.py --install install.json --from vendor/
+
+      - name: Drop the AWS credentials
+        if: always()
+        shell: bash
+        run: |
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
+                   AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE \
+                   ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+
+      - name: Does the backend load?
+        id: probe
+        continue-on-error: true
+        shell: bash
+        env:
+          BACKEND: ${{ fromJSON(inputs.leg).backend }}
+        run: python tools/probe_backend.py --backend "$BACKEND" --pyvisa-py pyvisa-py
+
+      - name: Run both transports
+        if: steps.probe.outcome == 'success'
+        env:
+          # Windows imposes no privileged-port restriction, so the portmapper
+          # binds 111 without administrator rights. Pinned rather than probed:
+          # without it the resource name falls back to the host,port extension,
+          # which the vendor implementations reject -- and a leg that quietly
+          # degraded to a name only pyvisa-py accepts would report a whole
+          # transport as unsupported.
+          TESTGEAR_PORTMAP: "1"
+          TESTGEAR_MOCK_SERVER: server/target/release/testgear-mock-server.exe
+        uses: ./.github/actions/run-leg
+        with:
+          leg: ${{ inputs.leg }}
+          pyvisa-py: pyvisa-py
+
+      - name: Record a leg that never got to run
+        if: always() && steps.probe.outcome != 'success'
+        shell: bash
+        env:
+          LEG: ${{ inputs.leg }}
+        run: |
+          mkdir -p out
+          if [[ "${{ steps.driver.outcome }}" == "failure" ]]; then
+            reason="the driver did not install; see the install step"
+          else
+            reason="the backend did not load; see the probe step"
+          fi
+          python tools/leg_status.py --leg "$LEG" --dir out --out out/leg.json \
+            --status unavailable --reason "$reason" \
+            --summary "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Upload
+        if: always() && steps.probe.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ fromJSON(inputs.leg).id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14

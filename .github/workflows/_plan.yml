@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# What to fan out to. The list itself lives in tools/gha_matrix.py, so the
+# labels and install pointers come from testgear.backends and there is still
+# one table saying what a backend is called.
+name: plan
+
+on:
+  workflow_call:
+    inputs:
+      run-type:
+        description: full (every implementation) or pyvisa-py (the py column only)
+        type: string
+        required: true
+    outputs:
+      legs:
+        value: ${{ jobs.plan.outputs.legs }}
+      linux-legs:
+        value: ${{ jobs.plan.outputs.linux-legs }}
+      windows-legs:
+        value: ${{ jobs.plan.outputs.windows-legs }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+      linux-legs: ${{ steps.legs.outputs.linux-legs }}
+      windows-legs: ${{ steps.legs.outputs.windows-legs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The plan travels as a job output rather than an artifact: the
+      # aggregate needs it to index columns for legs that produced nothing, and
+      # a leg that produced nothing is exactly the case where waiting on its
+      # artifact would not work.
+      - id: legs
+        run: python tools/gha_matrix.py --run-type "${{ inputs.run-type }}" --github-output

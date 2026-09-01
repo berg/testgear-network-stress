@@ -76,6 +76,12 @@ def main() -> int:
     )
     parser.add_argument("--reason", default="")
     parser.add_argument("--duration", type=float, default=0.0)
+    parser.add_argument(
+        "--summary",
+        help="append a Markdown tally to this file, for $GITHUB_STEP_SUMMARY. "
+        "Written per leg as well as for the run, so a leg that failed is "
+        "diagnosable without opening the aggregate",
+    )
     args = parser.parse_args()
 
     leg = json.loads(args.leg)
@@ -102,7 +108,60 @@ def main() -> int:
     )
     Path(args.out).write_text(json.dumps(leg, indent=2) + "\n", encoding="utf-8")
     print(f"{leg.get('id', '?')}: {status}" + (f" -- {reason}" if reason else ""))
+
+    if args.summary:
+        with open(args.summary, "a", encoding="utf-8") as handle:
+            handle.write(summarise(leg, reports))
     return 0
+
+
+def summarise(leg: dict, reports: list[Path]) -> str:
+    """This leg, in Markdown. Failures and skips by name, passes as a count.
+
+    The names matter and the count does not: a report is read to find out what
+    went wrong, and a list of two hundred passing checks buries the one that
+    did not.
+    """
+    name = leg.get("label", leg.get("id", "?"))
+    where = leg.get("os_label") or leg.get("host", "")
+    out = [f"### {name} &mdash; {where}", ""]
+    if leg["status"] != "ok":
+        out += [f"**{leg['status']}** &mdash; {leg.get('reason', '')}", ""]
+        return "\n".join(out) + "\n"
+
+    for path in reports:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        columns = loaded if isinstance(loaded, list) else [loaded]
+        for column in columns:
+            results = column.get("results", [])
+            tally: dict[str, int] = {}
+            for result in results:
+                tally[result["outcome"]] = tally.get(result["outcome"], 0) + 1
+            out.append(
+                f"`{path.stem}` &mdash; {tally.get('PASS', 0)} passed, "
+                f"{tally.get('FAIL', 0)} failed, {tally.get('SKIP', 0)} skipped"
+            )
+            out.append("")
+            for outcome in ("FAIL", "SKIP"):
+                named = [r for r in results if r["outcome"] == outcome]
+                if not named:
+                    continue
+                out.append(
+                    f"<details><summary>{len(named)} {outcome}</summary>\n"
+                )
+                for result in named:
+                    line = result["name"].replace("|", "\\|")
+                    out.append(f"- {line}")
+                out.append("\n</details>\n")
+    if leg.get("flaky"):
+        out += [
+            "> The target went away at least once (exit 3). Not counted as a "
+            "failure: a flaky bench reported as a library regression wastes "
+            "the next person's afternoon.",
+            "",
+        ]
+    out.append(f"_{leg.get('duration', 0)}s_\n")
+    return "\n".join(out) + "\n"
 
 
 if __name__ == "__main__":

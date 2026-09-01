@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Everything, against the latest main of both pyvisa and pyvisa-py.
+#
+# This workflow takes no repository or ref input, deliberately. It is the only
+# one that can reach the vendor installers, and giving it a caller-named tree
+# would mean a credential-holding job running code chosen by whoever pressed
+# the button. The refs are hardcoded upstream; testing a branch is what
+# pyvisa-py.yml is for.
+name: full run
+
+on:
+  schedule:
+    # Weekly. The NI image alone pulls about a gigabyte from ni.com.
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-run
+  # Never cancel: a vendor run is the better part of an hour and the page is
+  # its only output.
+  cancel-in-progress: false
+
+env:
+  PYVISA_PY_REPO: pyvisa/pyvisa-py
+  PYVISA_PY_REF: main
+  PYVISA_REF: main
+
+jobs:
+  plan:
+    uses: ./.github/workflows/_plan.yml
+    with:
+      run-type: full
+
+  linux:
+    needs: [plan]
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: ${{ fromJSON(needs.plan.outputs.linux-legs) }}
+    uses: ./.github/workflows/_leg-linux.yml
+    with:
+      leg: ${{ toJSON(matrix.leg) }}
+      pyvisa-py-repo: pyvisa/pyvisa-py
+      pyvisa-py-ref: main
+      pyvisa-ref: main
+      # Vendor legs enter the environment; py legs get "". The environment is
+      # what a fork PR cannot reach, and its branch policy is enforced by AWS
+      # through the OIDC subject rather than only by this file.
+      environment: ${{ matrix.leg.vendor && 'vendor-drivers' || '' }}
+
+
+  windows:
+    needs: [plan]
+    if: needs.plan.outputs.windows-legs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: ${{ fromJSON(needs.plan.outputs.windows-legs) }}
+    uses: ./.github/workflows/_leg-windows.yml
+    with:
+      leg: ${{ toJSON(matrix.leg) }}
+      pyvisa-py-repo: pyvisa/pyvisa-py
+      pyvisa-py-ref: main
+      pyvisa-ref: main
+      environment: ${{ matrix.leg.vendor && 'vendor-drivers' || '' }}
+
+  aggregate:
+    needs: [plan, linux, windows]
+    if: always()
+    uses: ./.github/workflows/_aggregate.yml
+    with:
+      plan: ${{ needs.plan.outputs.legs }}
+      title: VISA Conformance Matrix
+      subtitle: >-
+        Every implementation, both transports, against the latest main of
+        pyvisa and pyvisa-py.
+      page-url: https://berg.github.io/testgear-network-stress/
+      pages: true
+      # A full run's output is the page. Its job is to say what the
+      # implementations did, not to pass or fail.
+      gate: false
+
+  publish:
+    needs: [aggregate]
+    if: always() && needs.aggregate.result != 'skipped'
+    uses: ./.github/workflows/_publish.yml

@@ -31,7 +31,7 @@ STATUSES = ("ok", "unavailable", "errored", "not-run")
 #: the same run would be loaded as an implementation named "ni.rc" -- a column
 #: with no results, which is exactly the shape this code is careful to treat as
 #: "something did not run".
-NOT_COLUMNS = ("index.json",)
+NOT_COLUMNS = ("index.json", "leg.json", "plan.json")
 NOT_COLUMN_SUFFIXES = (".rc.json",)
 
 
