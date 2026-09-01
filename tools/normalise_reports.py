@@ -127,7 +127,10 @@ def main() -> int:
                 index.append(entry)
                 continue
 
-            for key in ("vendor_version", "flaky"):
+            # Carried through so the verdict has one input. exit codes are
+            # the only thing that separates "a check failed", which is the
+            # product, from "the suite is broken", which is not.
+            for key in ("vendor_version", "flaky", "exit_codes", "host"):
                 if status.get(key):
                     entry[key] = status[key]
 
