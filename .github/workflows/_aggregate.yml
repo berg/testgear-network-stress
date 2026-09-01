@@ -48,7 +48,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Tolerant of matching nothing. A run where every leg died before its
+      # upload step still has to reach the normalise step, which is what turns
+      # "no artifact" into a column saying so.
       - name: Collect the legs
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           path: artifacts
