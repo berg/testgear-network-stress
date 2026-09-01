@@ -39,28 +39,49 @@ OUR_BUG = (2, 5)
 LOST_TARGET = 3
 
 
-def classify(reports: list[Path], exit_codes: dict) -> tuple[str, str, bool]:
-    """(status, reason, flaky) for one leg."""
+def classify(reports: list[Path], exit_codes: dict) -> tuple[str, str, bool, list]:
+    """(status, reason, flaky, errors) for one leg.
+
+    `status` is about whether this leg produced columns at all. `errors` is a
+    separate question -- which scripts crashed -- and the two must not be
+    collapsed. A leg where one script exits 2 has still produced a hundred and
+    eighty good results, and throwing the column away to signal one crash is
+    the failure 973ed45 and 6581660 were both about: a whole script missing
+    from a column reads as "not applicable" rather than "this run crashed".
+
+    So a crash makes the run red, and the column is still published saying
+    which scripts are missing from it.
+    """
     # exit_codes is {file: {column label: {script: rc}}} -- one file per
     # transport, one column per backend the leg compared.
+    #
+    # Keyed by file *and* script, not by script alone. A script runs once per
+    # transport, so flattening on the name lets a clean vxi11 run overwrite a
+    # crashed hislip one and the leg reports itself healthy. That is the exact
+    # failure this file exists to prevent, and it got through the first CI run.
     flat: dict[str, int | None] = {}
-    for per_file in exit_codes.values():
+    for filename, per_file in exit_codes.items():
+        transport = filename.replace(".rc.json", "")
         for per_column in (per_file or {}).values():
             if isinstance(per_column, dict):
-                flat.update(per_column)
+                for script, code in per_column.items():
+                    flat[f"{script} [{transport}]"] = code
 
-    ours = sorted(s for s, rc in flat.items() if rc in OUR_BUG)
-    if ours:
-        return (
-            "errored",
-            f"the suite itself failed in {', '.join(ours)} "
-            f"(exit {flat[ours[0]]}); this is our bug, not a finding",
-            False,
-        )
+    errors = [
+        {"script": s, "exit": rc} for s, rc in sorted(flat.items()) if rc in OUR_BUG
+    ]
     flaky = any(rc == LOST_TARGET for rc in flat.values())
     if not reports:
-        return "not-run", "the leg produced no report", flaky
-    return "ok", "", flaky
+        return "not-run", "the leg produced no report", flaky, errors
+    reason = ""
+    if errors:
+        named = ", ".join(e["script"] for e in errors)
+        reason = (
+            f"{len(errors)} script(s) crashed and are missing from this "
+            f"column: {named}. That is this suite's bug, not a finding about "
+            f"the backend."
+        )
+    return "ok", reason, flaky, errors
 
 
 def main() -> int:
@@ -91,7 +112,7 @@ def main() -> int:
     for path in sorted(root.glob("*.rc.json")) if root.is_dir() else []:
         exit_codes[path.name] = json.loads(path.read_text(encoding="utf-8"))
 
-    status, reason, flaky = classify(reports, exit_codes)
+    status, reason, flaky, errors = classify(reports, exit_codes)
     if args.status:
         status, reason = args.status, args.reason or reason
     elif args.reason:
@@ -101,6 +122,7 @@ def main() -> int:
         status=status,
         reason=reason,
         flaky=flaky,
+        errors=errors,
         exit_codes=exit_codes,
         duration=round(args.duration, 1),
         host=f"{platform.system()} {platform.machine()}",
@@ -128,6 +150,16 @@ def summarise(leg: dict, reports: list[Path]) -> str:
     if leg["status"] != "ok":
         out += [f"**{leg['status']}** &mdash; {leg.get('reason', '')}", ""]
         return "\n".join(out) + "\n"
+    if leg.get("errors"):
+        out += [
+            f"> **{len(leg['errors'])} script(s) crashed** and are missing from "
+            f"this column: "
+            + ", ".join(f"`{e['script']}` (exit {e['exit']})" for e in leg["errors"])
+            + ". That is this suite's own bug, never a finding about the "
+            "backend -- but the checks those scripts would have run are simply "
+            "absent below, not passing.",
+            "",
+        ]
 
     for path in reports:
         loaded = json.loads(path.read_text(encoding="utf-8"))

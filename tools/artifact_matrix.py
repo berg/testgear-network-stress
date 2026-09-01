@@ -96,6 +96,7 @@ h2.proto{font-family:var(--cond);font-weight:700;font-size:1.4rem;margin:0;
    implementations that remain, which is the opposite of what happened. */
 .card.dead{border-style:dashed;opacity:.75}
 .card.dead .ver{color:var(--skip)}
+.card .ver.crashed{color:var(--fail)}
 .card .ver.os{margin-top:0;letter-spacing:.04em;text-transform:uppercase}
 th.st .os{display:block;font-family:var(--mono);font-weight:400;
   font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
@@ -293,6 +294,16 @@ def render_protocol(protocol: str, cols, out, prose: dict) -> None:
     )
     if matrix.all_skipped:
         lede += f" {len(matrix.all_skipped)} could not run anywhere."
+    # Stated separately from a dead column. These produced results and they are
+    # trustworthy; it is the checks that are missing, and a gap reads as "not
+    # applicable" unless something says otherwise.
+    labels = aggregate.display_labels(cols)
+    for i, column in enumerate(cols):
+        if column.get("errors"):
+            lede += (
+                f" {labels[i]} is missing {len(column['errors'])} script(s) "
+                f"that crashed ({', '.join(column['errors'])})."
+            )
     if len(matrix.compared) < 2:
         # compare.py says the same thing when it is handed one backend. A grid
         # with a single column is a report, and calling its zero disagreements
@@ -340,6 +351,9 @@ def render_protocol(protocol: str, cols, out, prose: dict) -> None:
         w(f'<div class="ver">{esc(sub)}</div>')
         if column.get("os_label"):
             w(f'<div class="ver os">{esc(column["os_label"])}</div>')
+        if column.get("errors"):
+            w(f'<div class="ver crashed">{len(column["errors"])} script(s) '
+              f'crashed &mdash; those checks are absent, not passing</div>')
         if st != "ok":
             w("</article>")
             continue

@@ -144,7 +144,7 @@ def main() -> int:
             # Carried through so the verdict has one input. exit codes are
             # the only thing that separates "a check failed", which is the
             # product, from "the suite is broken", which is not.
-            for key in ("vendor_version", "flaky", "exit_codes", "host"):
+            for key in ("vendor_version", "flaky", "exit_codes", "host", "errors"):
                 if status.get(key):
                     entry[key] = status[key]
 
@@ -165,6 +165,21 @@ def main() -> int:
                     entry["status"] = "not-run"
             else:
                 column["status"] = "ok"
+                if status.get("errors"):
+                    # Not a reason to drop the column -- it has everything the
+                    # scripts that did run produced -- but the gap has to be
+                    # visible, or a missing script reads as "not applicable".
+                    crashed = [
+                        e["script"] for e in status["errors"]
+                        if protocol in e["script"]
+                    ]
+                    if crashed:
+                        column["errors"] = crashed
+                        column["reason"] = (
+                            f"{len(crashed)} script(s) crashed and are missing "
+                            f"from this column: {', '.join(crashed)}"
+                        )
+                        entry["reason"] = column["reason"]
                 column["backend"] = entry["backend"]
                 column["os_label"] = entry["os_label"]
                 column["id"] = entry["id"]

@@ -118,6 +118,7 @@ def main() -> int:
     root = Path(args.columns)
     protocols = [d.name for d in sorted(root.iterdir()) if d.is_dir()]
     current: dict[str, dict[str, str]] = {}
+    seen_index: dict[str, list] = {}
     verdict = 0
     flaky_legs: set[str] = set()
 
@@ -141,41 +142,64 @@ def main() -> int:
                     f"{args.subject_leg}, which did not run",
                 )
 
-        index = json.loads((root / protocol / "index.json").read_text())["columns"]
+        seen_index[protocol] = json.loads(
+            (root / protocol / "index.json").read_text()
+        )["columns"]
+
+    # Exit codes are recorded per leg, covering every transport, and the same
+    # leg appears in each protocol's index. Walk them once, keyed by leg and
+    # script, or every crash is reported once per transport directory and
+    # labelled with whichever one happened to be iterating.
+    crashes: dict[tuple[str, str], int] = {}
+    lost: dict[tuple[str, str], int] = {}
+    for index in seen_index.values():
         for entry in index:
-            if entry.get("flaky"):
-                flaky_legs.add(entry["id"])
-            for per_file in (entry.get("exit_codes") or {}).values():
+            for filename, per_file in (entry.get("exit_codes") or {}).items():
+                # The transport is in the filename, not in the keys: a script
+                # runs once per transport and the same name appears twice.
+                transport = filename.replace(".rc.json", "")
                 for column_codes in (per_file or {}).values():
                     if not isinstance(column_codes, dict):
                         continue
                     for script, code in column_codes.items():
+                        where = f"{script} [{transport}]"
                         if code in OUR_BUG:
-                            verdict = 1
-                            annotate(
-                                "error",
-                                f"{entry['id']} [{protocol}] {script} exited "
-                                f"{code}: the suite itself is broken here, "
-                                f"which is never a finding about a backend",
-                            )
+                            crashes[(entry["id"], where)] = code
                         elif code == LOST_TARGET:
-                            annotate(
-                                "warning",
-                                f"{entry['id']} [{protocol}] {script} lost the "
-                                f"target (exit 3). Not counted as a failure.",
-                            )
+                            lost[(entry["id"], where)] = code
+            if entry.get("flaky"):
+                flaky_legs.add(entry["id"])
+
+    for (leg, script), code in sorted(crashes.items()):
+        verdict = 1
+        annotate(
+            "error",
+            f"{leg}: {script} exited {code}. The suite itself is broken here, "
+            f"which is never a finding about a backend -- and the checks that "
+            f"script would have run are absent from the column, not passing.",
+        )
+    for (leg, script), _ in sorted(lost.items()):
+        annotate(
+            "warning",
+            f"{leg}: {script} lost the target (exit 3). Not counted as a "
+            f"failure.",
+        )
+
+    reported: set[str] = set()
+    for protocol, index in seen_index.items():
+        for entry in index:
             if entry.get("status") == "errored":
                 verdict = 1
-                annotate(
-                    "error",
-                    f"{entry['id']}: {entry.get('reason', 'the leg errored')}",
-                )
+                annotate("error", f"{entry['id']}: {entry.get('reason', '')}")
             elif entry.get("status") not in ("ok", None):
-                annotate(
-                    "warning",
-                    f"{entry['id']} produced no {protocol} column: "
-                    f"{entry.get('reason', '')}",
-                )
+                key = f"{entry['id']}/{protocol}"
+                if key not in reported:
+                    reported.add(key)
+                    annotate(
+                        "warning",
+                        f"{entry['id']} produced no {protocol} column: "
+                        f"{entry.get('reason', '')}",
+                    )
 
     if args.write_baseline:
         Path(args.baseline).write_text(

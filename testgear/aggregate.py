@@ -298,7 +298,19 @@ def render_markdown(
             if st == "ok"
             else ["&mdash;"] * 3
         )
-        note = "ok" if st == "ok" else f"**{st}** &mdash; {column.get('reason', '')}"
+        if st != "ok":
+            note = f"**{st}** &mdash; {column.get('reason', '')}"
+        elif column.get("errors"):
+            # "ok" alone would be a lie here: the column is trustworthy but
+            # incomplete, and the checks the crashed scripts would have run are
+            # absent rather than passing.
+            note = (
+                f"ok, but **{len(column['errors'])} script(s) crashed** and "
+                f"their checks are absent: "
+                + ", ".join(f"`{e}`" for e in column["errors"])
+            )
+        else:
+            note = "ok"
         counts.append(
             [_md_escape(label(column)), column.get("os_label", ""), *cells,
              _md_escape(note)]

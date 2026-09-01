@@ -72,7 +72,10 @@ jobs:
         run: |
           git clone --filter=blob:none \
             "https://github.com/${{ inputs.pyvisa-py-repo }}" pyvisa-py
-          git -C pyvisa-py checkout --detach "${{ inputs.pyvisa-py-ref }}"
+          # Not --detach: for a branch this keeps the name, and the provenance
+          # block reports "0.8.1-79-g3cc4fe9 on main" rather than "on HEAD".
+          # A SHA detaches on its own anyway.
+          git -C pyvisa-py checkout "${{ inputs.pyvisa-py-ref }}"
           git -C pyvisa-py --no-pager log -1 --oneline
 
       # -- the vendor installer, for the legs that need one -----------------
