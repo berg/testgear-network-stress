@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from testgear import backends, report, suite  # noqa: E402
+from testgear import aggregate, backends, report, suite  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CHECKS = HERE / "checks"
@@ -90,28 +90,7 @@ def run_one(
         return json.loads(out.read_text()), proc.returncode
 
 
-def merge(reports: list[dict], label: str) -> dict:
-    """Fold several script reports into one column.
-
-    Check names are prefixed with their script, because two scripts can
-    legitimately use the same wording for different checks and collapsing them
-    in the matrix would compare unrelated things.
-    """
-    merged: dict = {"label": label, "results": [], "notes": [], "context": {}}
-    for rep in reports:
-        script = rep.get("script", "?")
-        if not merged["context"]:
-            merged["context"] = dict(rep.get("context", {}))
-        for result in rep.get("results", []):
-            entry = dict(result)
-            entry["name"] = f"{script}: {result['name']}"
-            # Match on the masked key, display the full name. A check whose
-            # message carries its measurements would otherwise split into one
-            # row per backend, each showing a gap where the others answered.
-            entry["key"] = f"{script}: {result.get('key', result['name'])}"
-            merged["results"].append(entry)
-        merged["notes"].extend(rep.get("notes", []))
-    return merged
+merge = aggregate.merge
 
 
 def main() -> int:
@@ -255,41 +234,19 @@ def main() -> int:
         return 2
 
     # -- the matrix ---------------------------------------------------------
-    keys: list[str] = []
-    display: dict[str, str] = {}
-    seen = set()
-    for column in merged_columns:
-        for result in column["results"]:
-            key = result["key"]
-            if key not in seen:
-                seen.add(key)
-                keys.append(key)
-                display[key] = result["name"]
-    lookups = [{r["key"]: r for r in c["results"]} for c in merged_columns]
-
-    width = max((len(display[k]) for k in keys), default=10)
-    width = min(width, 78)
+    matrix = aggregate.build(merged_columns)
+    width = min(max((len(r.name) for r in matrix.rows), default=10), 78)
     header = "  ".join(c["label"][:12].ljust(12) for c in merged_columns)
     print(f"\n{'check'.ljust(width)}  {header}")
     print("-" * (width + 2 + len(header)))
 
-    disagreements = 0
-    for key in keys:
-        cells = []
-        outcomes = set()
-        for lookup in lookups:
-            result = lookup.get(key)
-            outcome = result["outcome"] if result else "-"
-            outcomes.add(outcome)
-            cells.append(outcome.ljust(12))
-        differs = len(outcomes) > 1
-        disagreements += differs
-        marker = "<" if differs else " "
-        print(f"{display[key][:width].ljust(width)}  {'  '.join(cells)}{marker}")
+    for row in matrix.rows:
+        cells = "  ".join(o.ljust(12) for o in row.outcomes)
+        print(f"{row.name[:width].ljust(width)}  {cells}{'<' if row.differs else ' '}")
 
     print(
-        f"\n{len(keys)} checks, {disagreements} where the implementations "
-        f"disagree (marked <)"
+        f"\n{len(matrix.rows)} checks, {len(matrix.disagreements)} where the "
+        f"implementations disagree (marked <)"
     )
 
     if args.json:

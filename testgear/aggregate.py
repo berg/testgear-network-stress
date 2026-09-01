@@ -1,0 +1,318 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Folding runs into columns, and columns into a matrix.
+
+Four places grew their own copy of the same join -- `compare.py`, both tools in
+`tools/`, and `report.render_matrix` -- and they had already drifted in the
+details that matter: whether a column that produced nothing appears at all, and
+whether a row where one implementation is simply absent counts as a
+disagreement. Those are not rendering details. They decide what the published
+page claims.
+
+The join itself is on `harness.stable_key`, never on the displayed name. Check
+names carry their measurements, which is right for reading one run and wrong
+for lining several up: two backends reporting different status codes produce
+two different names, so the row splits in two and each column shows a gap where
+the other one answered.
+"""
+
+from __future__ import annotations
+
+import collections
+import dataclasses
+
+#: A column that did not produce results still gets one of these, so the
+#: matrix can say why. `ok` is the only status whose outcomes are compared;
+#: see `Row.differs`.
+STATUSES = ("ok", "unavailable", "errored", "not-run")
+
+
+def merge(reports: list[dict], label: str) -> dict:
+    """Fold several script reports into one column.
+
+    Check names are prefixed with their script, because two scripts can
+    legitimately use the same wording for different checks and collapsing them
+    in the matrix would compare unrelated things.
+    """
+    merged: dict = {"label": label, "results": [], "notes": [], "context": {}}
+    for rep in reports:
+        script = rep.get("script", "?")
+        if not merged["context"]:
+            merged["context"] = dict(rep.get("context", {}))
+        for result in rep.get("results", []):
+            entry = dict(result)
+            entry["name"] = f"{script}: {result['name']}"
+            # Match on the masked key, display the full name. A check whose
+            # message carries its measurements would otherwise split into one
+            # row per backend, each showing a gap where the others answered.
+            entry["key"] = f"{script}: {result.get('key', result['name'])}"
+            merged["results"].append(entry)
+        merged["notes"].extend(rep.get("notes", []))
+    return merged
+
+
+def status(column: dict) -> str:
+    """A column's status, defaulting to `ok` for one that carries results."""
+    declared = column.get("status")
+    if declared in STATUSES:
+        return declared
+    return "ok" if column.get("results") else "not-run"
+
+
+def label(column: dict) -> str:
+    return column.get("label") or column.get("context", {}).get("backend", "?")
+
+
+@dataclasses.dataclass
+class Row:
+    """One check, across every column."""
+
+    key: str
+    name: str
+    rule: str
+    script: str
+    #: The full result per column, positionally, or None where that column has
+    #: no answer for this check.
+    cells: list[dict | None]
+    #: Which columns were compared to reach `differs` -- the `ok` ones.
+    compared: list[int]
+
+    @property
+    def outcomes(self) -> list[str]:
+        return [c["outcome"] if c else "-" for c in self.cells]
+
+    @property
+    def compared_outcomes(self) -> list[str]:
+        return [self.outcomes[i] for i in self.compared]
+
+    @property
+    def differs(self) -> bool:
+        """Whether the implementations disagree about this check.
+
+        Only `ok` columns count. A leg that never ran would otherwise turn one
+        dead runner into a full page of fabricated disparities -- the loudest
+        possible way for the matrix to lie.
+
+        A `-` in an `ok` column does count: a script that crashed under one
+        implementation and not another is a real difference, and reporting it
+        as agreement is how a whole missing script reads as "not applicable".
+        """
+        return len(set(self.compared_outcomes)) > 1
+
+    @property
+    def all_skipped(self) -> bool:
+        return bool(self.compared) and set(self.compared_outcomes) == {"SKIP"}
+
+
+@dataclasses.dataclass
+class Matrix:
+    columns: list[dict]
+    rows: list[Row]
+
+    @property
+    def compared(self) -> list[int]:
+        return [i for i, c in enumerate(self.columns) if status(c) == "ok"]
+
+    @property
+    def disagreements(self) -> list[Row]:
+        return [r for r in self.rows if r.differs]
+
+    @property
+    def all_skipped(self) -> list[Row]:
+        return [r for r in self.rows if r.all_skipped]
+
+    def unique_failures(self, subject: str = "PyVISA-py") -> list[Row]:
+        """Rows where `subject` fails and every other compared column passes.
+
+        This used to be spelled `len(outcomes) == 3 and outcomes == [FAIL,
+        PASS, PASS]`, which silently counted nothing as soon as a fourth
+        implementation joined the matrix -- and counted the wrong thing if the
+        columns were ever reordered.
+        """
+        try:
+            at = next(
+                i for i in self.compared if label(self.columns[i]) == subject
+            )
+        except StopIteration:
+            return []
+        others = [i for i in self.compared if i != at]
+        if not others:
+            return []
+        return [
+            r
+            for r in self.rows
+            if r.outcomes[at] == "FAIL"
+            and all(r.outcomes[i] == "PASS" for i in others)
+        ]
+
+    def counts(self, index: int) -> collections.Counter:
+        column = self.columns[index]
+        return collections.Counter(r["outcome"] for r in column.get("results", []))
+
+    def by_script(self) -> "collections.OrderedDict[str, list[Row]]":
+        groups: collections.OrderedDict[str, list[Row]] = collections.OrderedDict()
+        for row in self.rows:
+            groups.setdefault(row.script, []).append(row)
+        return groups
+
+
+def build(columns: list[dict]) -> Matrix:
+    """Line columns up into rows, in the order the checks were written.
+
+    The union of keys keeps the order of the first column that has each, so the
+    table reads in source order rather than in the order of whichever
+    implementation happened to answer.
+    """
+    lookups = [
+        {r.get("key", r["name"]): r for r in c.get("results", [])} for c in columns
+    ]
+    compared = [i for i, c in enumerate(columns) if status(c) == "ok"]
+
+    rows: list[Row] = []
+    seen: set[str] = set()
+    for column in columns:
+        for result in column.get("results", []):
+            key = result.get("key", result["name"])
+            if key in seen:
+                continue
+            seen.add(key)
+            name = result["name"]
+            script, _, rest = name.partition(": ")
+            cells = [lk.get(key) for lk in lookups]
+            rule = next((c["rule"] for c in cells if c and c.get("rule")), "")
+            rows.append(
+                Row(
+                    key=key,
+                    name=name,
+                    rule=rule,
+                    script=script if rest else "",
+                    cells=cells,
+                    compared=compared,
+                )
+            )
+    return Matrix(columns=columns, rows=rows)
+
+
+# -- markdown ---------------------------------------------------------------
+#
+# Rendered for $GITHUB_STEP_SUMMARY, which is read on a phone as often as not.
+# Failures and disagreements come first and the full grid comes last, folded
+# away: a report is read to find out what went wrong, and forty green rows
+# above the one red one buries its own point.
+
+#: Outcomes as they appear in a cell. FAIL is the only one shouted, because it
+#: is the only one worth finding by eye in a wall of table.
+_CELL = {"PASS": "pass", "FAIL": "**FAIL**", "SKIP": "skip", "-": "&mdash;"}
+
+
+def _md_escape(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _md_table(header: list[str], rows: list[list[str]]) -> list[str]:
+    if not rows:
+        return []
+    return (
+        [f"| {' | '.join(header)} |", f"|{'|'.join(['---'] * len(header))}|"]
+        + [f"| {' | '.join(r)} |" for r in rows]
+    )
+
+
+def _outcome_rows(matrix: Matrix, rows: list[Row]) -> list[list[str]]:
+    return [
+        [_md_escape(r.name)]
+        + [_CELL.get(o, o) for o in (r.outcomes[i] for i in matrix.compared)]
+        + [_md_escape(r.rule) or ""]
+        for r in rows
+    ]
+
+
+def render_markdown(
+    matrix: Matrix,
+    protocol: str,
+    *,
+    subject: str = "PyVISA-py",
+    max_rows: int = 60,
+) -> str:
+    """One transport's results as GitHub-flavoured Markdown."""
+    out: list[str] = [f"## {protocol}", ""]
+
+    # -- what each column did, including the ones that did nothing ----------
+    counts = []
+    for i, column in enumerate(matrix.columns):
+        st = status(column)
+        n = matrix.counts(i)
+        cells = (
+            [str(n.get(k, 0)) for k in ("PASS", "FAIL", "SKIP")]
+            if st == "ok"
+            else ["&mdash;"] * 3
+        )
+        note = "ok" if st == "ok" else f"**{st}** &mdash; {column.get('reason', '')}"
+        counts.append(
+            [_md_escape(label(column)), column.get("os_label", ""), *cells,
+             _md_escape(note)]
+        )
+    out += _md_table(
+        ["Column", "OS", "Pass", "Fail", "Skip", "Status"], counts
+    ) + [""]
+
+    missing = [c for c in matrix.columns if status(c) != "ok"]
+    if missing:
+        # Stated as prose as well as in the table. A comparison with a column
+        # silently absent reads like agreement between the ones that remain,
+        # and the table alone is easy to skim past.
+        out += [
+            f"> {len(missing)} of {len(matrix.columns)} implementations produced "
+            f"no results, so every row below compares only the rest.",
+            "",
+        ]
+
+    headers = ["Check"] + [
+        _md_escape(label(matrix.columns[i])) for i in matrix.compared
+    ] + ["Rule"]
+
+    def section(title: str, rows: list[Row], blurb: str = "") -> None:
+        if not rows:
+            return
+        out.append(f"### {title} ({len(rows)})")
+        if blurb:
+            out.extend(["", blurb])
+        out.append("")
+        shown = rows[:max_rows]
+        out.extend(_md_table(headers, _outcome_rows(matrix, shown)))
+        if len(rows) > len(shown):
+            out.extend(["", f"_…and {len(rows) - len(shown)} more._"])
+        out.append("")
+
+    unique = matrix.unique_failures(subject)
+    unique_keys = {r.key for r in unique}
+    section(
+        f"Failures unique to {subject}",
+        unique,
+        f"Checks {subject} fails that every other implementation here passes.",
+    )
+    section(
+        "Where the implementations disagree",
+        [r for r in matrix.disagreements if r.key not in unique_keys],
+    )
+
+    skipped = matrix.all_skipped
+    if skipped:
+        out += [
+            f"### Skipped everywhere ({len(skipped)})",
+            "",
+            "A skipped check is not a passing one. These are the ones to watch: "
+            "the ones that stay skipped run after run are how a gap in coverage "
+            "hides in plain sight.",
+            "",
+        ] + _md_table(headers, _outcome_rows(matrix, skipped[:max_rows])) + [""]
+
+    out += [
+        "<details><summary>Full matrix "
+        f"({len(matrix.rows)} checks)</summary>",
+        "",
+    ]
+    for script, rows in matrix.by_script().items():
+        out += [f"**{_md_escape(script) or 'checks'}**", ""]
+        out += _md_table(headers, _outcome_rows(matrix, rows)) + [""]
+    out += ["</details>", ""]
+    return "\n".join(out)

@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from testgear import report  # noqa: E402
+from testgear import aggregate, report  # noqa: E402
 
 
 def main() -> int:
@@ -44,41 +44,19 @@ def main() -> int:
         print(f"no reports in {args.directory}", file=sys.stderr)
         return 4
 
-    keys: list[str] = []
-    display: dict[str, str] = {}
-    seen = set()
-    for column in columns:
-        for result in column.get("results", []):
-            key = result.get("key", result["name"])
-            if key not in seen:
-                seen.add(key)
-                keys.append(key)
-                display[key] = result["name"]
-    lookups = [
-        {r.get("key", r["name"]): r for r in c.get("results", [])} for c in columns
-    ]
-
-    width = min(max((len(display[k]) for k in keys), default=10), 74)
+    matrix = aggregate.build(columns)
+    width = min(max((len(r.name) for r in matrix.rows), default=10), 74)
     header = "  ".join(c["label"][:14].ljust(14) for c in columns)
     print(f"\n{'check'.ljust(width)}  {header}")
     print("-" * (width + 2 + len(header)))
 
-    differing = 0
-    for key in keys:
-        cells, outcomes = [], set()
-        for lookup in lookups:
-            result = lookup.get(key)
-            outcome = result["outcome"] if result else "-"
-            outcomes.add(outcome)
-            cells.append(outcome.ljust(14))
-        differs = len(outcomes) > 1
-        differing += differs
-        print(f"{display[key][:width].ljust(width)}  {'  '.join(cells)}"
-              f"{'<' if differs else ''}")
+    for row in matrix.rows:
+        cells = "  ".join(o.ljust(14) for o in row.outcomes)
+        print(f"{row.name[:width].ljust(width)}  {cells}{'<' if row.differs else ''}")
 
     print(
-        f"\n{len(keys)} checks across {len(columns)} implementations, "
-        f"{differing} where they disagree (marked <)"
+        f"\n{len(matrix.rows)} checks across {len(columns)} implementations, "
+        f"{len(matrix.disagreements)} where they disagree (marked <)"
     )
 
     if args.html:
