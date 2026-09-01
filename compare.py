@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -30,43 +31,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from testgear import backends, report  # noqa: E402
+from testgear import backends, report, suite  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CHECKS = HERE / "checks"
 
-#: The scripts worth comparing: everything the suite has, in run order.
-#:
-#: This list used to name five scripts, which quietly decided what the
-#: published matrix could ever show -- the spec-conformance scripts added
-#: later were absent, and they are where nearly every finding lives. A
-#: comparison that silently covers a third of the suite is worse than no
-#: comparison, because it reads as coverage.
-#:
-#: The soak is still left out on purpose: it is a randomised workload whose
-#: value is duration, and its single summary check says nothing in a matrix.
-DEFAULT_SCRIPTS = (
-    "01_smoke.py",
-    "02_io.py",
-    "03_srq.py",
-    "04_concurrency.py",
-    "05_lock.py",
-    "06_terminate.py",
-    "07_clear.py",
-    "09_remote_local.py",
-    "10_lock_semantics.py",
-    "12_session_lifecycle.py",
-    "13_events.py",
-    "15_required_attributes.py",
-    "16_operations.py",
-    "17_resource_names.py",
-    "conformance.py",
-)
-
-#: Scripts that read one transport's wire format directly, so they only mean
-#: anything on that transport.
-VXI11_ONLY = ("vxi11_conformance.py", "14_vxi11_flags.py")
-HISLIP_ONLY = ("11_hislip_messages.py",)
+#: The scripts worth comparing come from `testgear.suite`, filtered to those
+#: marked `in_matrix`. This list used to live here, naming five scripts, which
+#: quietly decided what the published matrix could ever show -- the
+#: spec-conformance scripts added later were absent, and they are where nearly
+#: every finding lives. A comparison that silently covers a third of the suite
+#: is worse than no comparison, because it reads as coverage. Keeping it in one
+#: place with the other two runners is how it stops happening again.
 
 
 def run_one(
@@ -77,8 +53,16 @@ def run_one(
     tree: str | None,
     extra: list[str],
     timeout: float,
-) -> dict | None:
-    """Run one script and return its report, or None if it produced none."""
+) -> tuple[dict | None, int | None]:
+    """Run one script: its report (or None), and the exit code it left.
+
+    The exit code is not decoration. `harness.main` maps failure modes onto
+    distinct codes -- 2 is an unexpected exception, 5 is this suite calling
+    VISA wrongly, 3 is the target going away -- and a script can write a
+    perfectly good report and still exit 2. Dropping the code loses the only
+    signal that separates "a check failed", which is the product, from "the
+    suite is broken", which is the only thing CI should ever go red on.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "report.json"
         argv = [
@@ -97,13 +81,13 @@ def run_one(
             )
         except subprocess.TimeoutExpired:
             print(f"    {script}: timed out after {timeout:.0f}s", file=sys.stderr)
-            return None
+            return None, None
         if not out.exists():
             first = (proc.stderr or proc.stdout or "").strip().splitlines()
             why = first[-1] if first else f"exit {proc.returncode}"
             print(f"    {script}: no report ({why})", file=sys.stderr)
-            return None
-        return json.loads(out.read_text())
+            return None, proc.returncode
+        return json.loads(out.read_text()), proc.returncode
 
 
 def merge(reports: list[dict], label: str) -> dict:
@@ -137,6 +121,17 @@ def main() -> int:
         default=None,
         help="comma-separated backend ids (default: every one installed here)",
     )
+    # Spelled out rather than left to the passthrough. Without it argparse
+    # abbreviation-matches `--pyvisa-py` to `--pyvisa-py-trees` and reports
+    # "wants label=path" about a flag the README says every script accepts --
+    # which is a confusing way to find out you compared the wrong tree.
+    parser.add_argument(
+        "--pyvisa-py",
+        metavar="TREE",
+        default=os.environ.get("TESTGEAR_PYVISA_PY"),
+        help="path to a pyvisa-py checkout to test instead of whatever is "
+        "installed, used for every column (env: TESTGEAR_PYVISA_PY)",
+    )
     parser.add_argument(
         "--pyvisa-py-trees",
         default=None,
@@ -147,10 +142,17 @@ def main() -> int:
     parser.add_argument(
         "--scripts",
         default=None,
-        help=f"comma-separated scripts (default: {','.join(DEFAULT_SCRIPTS)})",
+        help="comma-separated scripts (default: every script in the suite "
+        "that belongs in a matrix -- see testgear/suite.py)",
     )
     parser.add_argument("--html", metavar="PATH", help="write the matrix as HTML")
     parser.add_argument("--json", metavar="PATH", help="write the merged reports")
+    parser.add_argument(
+        "--exit-codes",
+        metavar="PATH",
+        help="write each script's exit code as JSON. A timed-out script has a "
+        "null code; see testgear.harness.main for what each code means",
+    )
     parser.add_argument(
         "--timeout", type=float, default=600.0, help="per-script timeout in seconds"
     )
@@ -166,16 +168,23 @@ def main() -> int:
     )
     args, extra = parser.parse_known_args()
 
-    scripts = list(
-        args.scripts.split(",") if args.scripts else DEFAULT_SCRIPTS
+    scripts = (
+        args.scripts.split(",")
+        if args.scripts
+        else suite.names(args.protocol, matrix_only=True)
     )
-    if not args.scripts:
-        scripts += list(VXI11_ONLY if args.protocol == "vxi11" else HISLIP_ONLY)
 
     # Two comparison modes. Several trees of one backend answers "did my branch
     # change anything?"; several backends answers "is pyvisa-py the odd one
     # out?". They are the same matrix with different columns.
     columns: list[tuple[str, str, str | None]] = []
+    if args.pyvisa_py_trees and args.pyvisa_py:
+        print(
+            "--pyvisa-py names one tree for every column and --pyvisa-py-trees "
+            "names a column per tree; they cannot both be right",
+            file=sys.stderr,
+        )
+        return 4
     if args.pyvisa_py_trees:
         for pair in args.pyvisa_py_trees.split(","):
             label, _, path = pair.partition("=")
@@ -189,6 +198,15 @@ def main() -> int:
                 return 4
             columns.append((label, "py", path))
     else:
+        if args.pyvisa_py:
+            # Fail here rather than once per script. use_pyvisa_py_tree refuses
+            # a path that is not a pyvisa-py checkout on purpose: silently
+            # testing the wrong tree is worse than not running.
+            try:
+                backends.use_pyvisa_py_tree(args.pyvisa_py)
+            except backends.TreeError as exc:
+                print(exc, file=sys.stderr)
+                return 4
         wanted = (
             args.backends.split(",") if args.backends else list(backends.BACKENDS)
         )
@@ -217,14 +235,16 @@ def main() -> int:
         )
 
     merged_columns = []
+    exit_codes: dict[str, dict[str, int | None]] = {}
     for label, backend, tree in columns:
         print(f"\n=== {label} ({args.protocol})")
         reports = []
         for script in scripts:
             print(f"  {script}")
-            rep = run_one(
+            rep, rc = run_one(
                 args.python, script, args.protocol, backend, tree, extra, args.timeout
             )
+            exit_codes.setdefault(label, {})[script] = rc
             if rep is not None:
                 reports.append(rep)
         if reports:
@@ -275,6 +295,9 @@ def main() -> int:
     if args.json:
         Path(args.json).write_text(json.dumps(merged_columns, indent=2))
         print(f"merged reports written to {args.json}")
+    if args.exit_codes:
+        Path(args.exit_codes).write_text(json.dumps(exit_codes, indent=2))
+        print(f"exit codes written to {args.exit_codes}")
     if args.html:
         report.write_matrix(
             merged_columns,

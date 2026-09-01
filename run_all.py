@@ -2,9 +2,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Run the whole suite, on any platform.
 
-The same sweep as run_all.sh, in Python so it works where bash does not --
-which in practice means Windows, where Keysight and Tektronix ship the only
-VISA implementations this suite cannot otherwise reach.
+The sweep itself. `run_all.sh` is a shim over this one, kept for the habit of
+typing it and for the REPORTS/SOAK/ITER environment variables; the sweep is
+here because it has to work where bash does not -- which in practice means
+Windows, where Keysight and Tektronix ship the only VISA implementations this
+suite cannot otherwise reach.
+
+Which scripts run, in what order, with what arguments, comes from
+`testgear.suite` -- shared with `compare.py`, so the matrix and the sweep can
+never disagree about what the suite is.
 
     python run_all.py                                 # everything, both transports
     python run_all.py --protocol hislip               # one transport
@@ -24,30 +30,9 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
-# Per transport, in order. `None` means both; otherwise the one transport whose
-# wire protocol the script inspects directly.
-SCRIPTS: list[tuple[str, list[str], str | None]] = [
-    ("01_smoke.py", [], None),
-    ("02_io.py", ["-n", "{iter}"], None),
-    ("03_srq.py", ["-n", "30"], None),
-    ("04_concurrency.py", ["-n", "{iter}"], None),
-    ("05_lock.py", ["-n", "{iter}"], None),
-    ("06_terminate.py", ["-n", "15"], None),
-    ("07_clear.py", ["-n", "40"], None),
-    ("09_remote_local.py", [], None),
-    ("10_lock_semantics.py", [], None),
-    ("12_session_lifecycle.py", [], None),
-    ("13_events.py", [], None),
-    ("15_required_attributes.py", [], None),
-    ("16_operations.py", [], None),
-    ("17_resource_names.py", [], None),
-    ("conformance.py", [], None),
-    ("08_soak.py", ["--duration", "{soak}", "--srq-thread"], None),
-    ("vxi11_conformance.py", [], "vxi11"),
-    ("14_vxi11_flags.py", [], "vxi11"),
-    ("11_hislip_messages.py", [], "hislip"),
-]
+from testgear import suite  # noqa: E402
 
 
 def main() -> int:
@@ -58,21 +43,18 @@ def main() -> int:
     parser.add_argument("--iterations", type=int, default=300)
     args, passthrough = parser.parse_known_args()
 
-    protocols = [args.protocol] if args.protocol else ["hislip", "vxi11"]
+    protocols = (args.protocol,) if args.protocol else ("hislip", "vxi11")
     reports = pathlib.Path(args.reports) if args.reports else None
     if reports:
         reports.mkdir(parents=True, exist_ok=True)
 
     failed = ran = skipped = 0
     for proto in protocols:
-        for name, extra, only in SCRIPTS:
-            if only and only != proto:
-                continue
+        for script in suite.for_protocol(proto):
             ran += 1
+            name = script.name
             cmd = [sys.executable, str(HERE / "checks" / name), "--protocol", proto]
-            cmd += [
-                a.format(iter=args.iterations, soak=args.soak) for a in extra
-            ]
+            cmd += script.argv(iterations=args.iterations, soak=args.soak)
             if reports:
                 cmd += ["--report", str(reports / f"{name[:-3]}-{proto}.json")]
             cmd += passthrough
