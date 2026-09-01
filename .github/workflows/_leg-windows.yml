@@ -81,8 +81,10 @@ jobs:
         run: cargo build --release --manifest-path server/Cargo.toml
 
       # -- the vendor driver, for the legs that need one --------------------
+      # See the note in _leg-linux.yml: an unprovisioned store is an
+      # unavailable column, not a failed run.
       - name: Assume the vendor-read role
-        if: fromJSON(inputs.leg).vendor
+        if: fromJSON(inputs.leg).vendor && vars.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
@@ -92,7 +94,7 @@ jobs:
 
       - name: Fetch and install the vendor driver
         id: driver
-        if: fromJSON(inputs.leg).vendor
+        if: fromJSON(inputs.leg).vendor && vars.AWS_ROLE_ARN != ''
         continue-on-error: true
         shell: bash
         run: |
@@ -149,7 +151,10 @@ jobs:
           LEG: ${{ inputs.leg }}
         run: |
           mkdir -p out
-          if [[ "${{ steps.driver.outcome }}" == "failure" ]]; then
+          if [[ "${{ fromJSON(inputs.leg).vendor }}" == "true" \
+                && -z "${{ vars.AWS_ROLE_ARN }}" ]]; then
+            reason="no vendor installer store is configured for this repository, so the driver was never fetched"
+          elif [[ "${{ steps.driver.outcome }}" == "failure" ]]; then
             reason="the driver did not install; see the install step"
           else
             reason="the backend did not load; see the probe step"
