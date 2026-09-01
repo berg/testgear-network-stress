@@ -17,15 +17,26 @@ it and cannot be baked into any image or cache CI produces. They live in a
 private bucket, and a CI job fetches one, uses it inside the job, and discards
 it.
 
-Two properties matter more than anything else below:
+**None of this is secret.** The installers are free downloads from each
+vendor, behind a licence click-through. What the licences withhold is the right
+to *redistribute*, and this repository is public -- so the whole point of the
+bucket is to have somewhere to keep them that is not a public repository. Read
+what follows as tidiness, not as a perimeter.
 
-1. **A fork pull request must never be able to assume the role.** The
+Two properties are still worth having, because they are nearly free:
+
+1. **A fork pull request should not be able to assume the role.** The
    pyvisa-py workflow clones a caller-named repository at a caller-named ref
-   and *executes it*. That is its purpose. Nothing that does that may hold a
-   credential.
-2. **The role must not be able to write.** A compromised CI job should not be
-   able to replace a driver with a different one, which would silently change
-   what every future run measures.
+   and *executes it*; that is its purpose. Keeping a credential away from it
+   costs nothing and means the role is easy to reason about.
+2. **The role must not be able to write.** This one is worth real care. A job
+   that could replace a driver would silently change what every future run
+   measures, and a comparison against a library nobody can identify is not a
+   comparison. Read-only is the property to get right.
+
+Correspondingly, do **not** bother with: KMS, an access-log bucket, MFA
+conditions, or a permissions boundary. They would all be guarding freely
+downloadable files.
 
 ---
 
@@ -37,7 +48,7 @@ it is, it must be given to CI as `AWS_REGION`.
 
 | Setting | Required value | Why |
 | --- | --- | --- |
-| Block Public Access | all four flags on | Non-redistributable binaries. This is the one setting that is not a preference. |
+| Block Public Access | all four flags on | The one setting that is not a preference -- a public bucket of these files is the exact thing the licences forbid. |
 | Object ownership | bucket-owner-enforced (ACLs disabled) | Nothing here needs ACLs, and a disabled feature cannot be misconfigured. |
 | Versioning | enabled | So a bad upload is rolled back rather than re-downloaded from a click-through. |
 | Default encryption | SSE-S3 (AES256) | KMS would need a second grant on the role and buys nothing: these are vendor installers, not secrets. If the account mandates KMS, the role needs `kms:Decrypt` on that key too. |
@@ -259,9 +270,12 @@ aws s3 cp s3://$VENDOR_BUCKET/manifest.json -
 # 3. It must NOT be able to write:
 echo x | aws s3 cp - s3://$VENDOR_BUCKET/drivers/probe.txt   # expect AccessDenied
 
-# 4. It must NOT work from a branch other than main.
-# 5. It must NOT work from a fork pull request: open one and confirm no job
+# 4. It should NOT work from a branch other than main.
+# 5. It should NOT work from a fork pull request: open one and confirm no job
 #    even attempts the assume-role.
 ```
 
-A provisioning run that cannot demonstrate 3, 4 and 5 has not finished.
+**3 is the one to insist on.** A role that can write could replace a driver,
+and then every future run measures something nobody can name. 4 and 5 are worth
+confirming once because they are how the gate is supposed to behave, but
+failing them would leak nothing worse than a free download.

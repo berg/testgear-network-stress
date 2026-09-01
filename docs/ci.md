@@ -10,6 +10,19 @@ Two workflows, and a rule that holds both of them up.
 Everything else is a reusable workflow the two of them call: `_plan`,
 `_leg-linux`, `_leg-windows`, `_aggregate`, `_publish`.
 
+## What is actually being protected
+
+Not secrets. The bucket holds NI, R&S, Keysight and TekVISA installers, which
+are freely downloadable from the vendors by anyone willing to click through a
+licence page. Nothing in it is confidential.
+
+What the licences do not permit is **redistribution**, and this repository is
+public. So the property worth keeping is narrow and specific: those files, and
+any image layer containing them, must not end up somewhere that hands them to
+the world. That is a licensing constraint, not a security perimeter, and the
+arrangement below should be read as tidiness rather than as a defence against
+an adversary.
+
 ## The rule
 
 **Nothing that runs third-party code holds a credential.**
@@ -32,10 +45,20 @@ is about the workflow rather than the event, and it is enforced structurally:
   matches no branch policy, and is stopped before the job starts.
 - The role's OIDC trust policy requires
   `repo:OWNER/REPO:environment:vendor-drivers` as an exact string, so that
-  branch rule is enforced by **AWS**, not only by YAML a pull request could
-  edit.
+  branch rule is enforced by AWS as well as by GitHub.
 - AWS credentials are cleared from the environment immediately after the
   installer is fetched, before anything third-party runs.
+
+None of that is load-bearing against a determined attacker, and it is not meant
+to be: the credential reads four installer files and can write nothing. It is
+cheap, so it is done. The reason to keep it is that a role which *could* only
+ever read those files is easy to reason about, and one that has drifted into
+holding something else is not.
+
+Two things this deliberately does **not** do, because the value does not
+justify them here: `main` is not branch-protected, and the environment carries
+no required reviewer. Both would make sense for a bucket that held secrets.
+This one does not.
 
 **Never use `pull_request_target`.** It runs base-repo workflow code with a
 writable token and repository secrets, against a pull request's source tree —
@@ -46,17 +69,19 @@ of a write token.
 
 **Vendor installers must not leave the job that fetched them.**
 
-On a public repository, workflow artifacts and Actions caches are readable by
-anyone, and caches on the default branch are readable by fork-PR workflows. So
-for anything under `vendor/`, or any image layer containing it:
+This is the rule that matters, and it is a licensing one. On a public
+repository, workflow artifacts and Actions caches are readable by anyone --
+so uploading a vendor installer to one *is* redistributing it, to precisely
+the audience the licence is about. For anything under `vendor/`, or any image
+layer containing it:
 
 - no `actions/upload-artifact`
 - no `actions/cache`
 - no buildx `type=gha` cache
 - no registry push, including a public GHCR package
 
-This is the rule most likely to be undone by a well-meaning speed
-optimisation — the NI image takes eight to twelve minutes to build, and caching
+Of the two rules here this is the one to actually enforce, and it is the one
+most likely to be undone by a well-meaning speed optimisation — the NI image takes eight to twelve minutes to build, and caching
 it is the obvious thing to reach for. The `py` image has nothing proprietary in
 it and *is* safe to cache; the vendor ones are not. If the build time becomes
 intolerable, the answer is a **private** GHCR package pushed only from `main`,
