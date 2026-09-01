@@ -121,6 +121,29 @@ measures a library it cannot identify is not a measurement. A backend with no
 entry is not an error — that leg reports the implementation as unavailable and
 the page draws the column with that reason.
 
+### Filling the bucket
+
+`tools/upload_vendor.py` uploads the installers and writes the manifest in one
+step, so a checksum cannot drift from the file it describes:
+
+```bash
+# Drop the downloads in vendor/<backend>/ as vendor/README.md describes, then
+tools/upload_vendor.py --bucket "$VENDOR_BUCKET" --dry-run   # what it would do
+tools/upload_vendor.py --bucket "$VENDOR_BUCKET"
+```
+
+It runs as a human with their own credentials -- the CI role has no
+`PutObject`. It scans the same `vendor/` directory the Dockerfile and
+`remote-compare.sh` already read, so there is one place to drop a download; it
+merges into the existing manifest rather than replacing it, so adding one
+driver does not disturb the others; and it refuses the R&S `armhf` build, which
+is the trap `vendor/README.md` warns about and which would otherwise fail
+inside the image with a confusing dpkg architecture error.
+
+A backend with no installer is simply absent from the manifest, and its leg
+reports the backend unavailable -- a column on the page saying so, not a failed
+run.
+
 The Windows `install.args` are **not yet known**. Keysight IO Libraries Suite
 and TekVISA are InstallShield-family bundles; the flags need verifying by hand
 on a throwaway Windows VM once. They live here rather than in code precisely so
