@@ -353,9 +353,9 @@ Reproduce:
 
 ### HiSLIP reconnection fails partway through open/close churn, on Windows
 
-**Status:** open, **side not yet determined**. Reproduced on both CI runs that
-have exercised it, on `windows-latest`, over HiSLIP, against upstream `main`
-(`3cc4fe9`).
+**Status:** open, **side not yet determined**. Reproduced on every CI run that
+has exercised it -- three of three -- on `windows-latest`, over HiSLIP, against
+upstream `main` (`3cc4fe9`).
 
 `04_concurrency` ends by opening and closing the same resource twenty times,
 checking that threads and descriptors are reclaimed. On Windows the HiSLIP
@@ -367,6 +367,31 @@ VisaIOError: VI_ERROR_RSRC_NFOUND (-1073807343)
 
 after seven of the twenty cycles, for a resource that had opened successfully
 seven times immediately before and that the run had been using throughout.
+
+**It stops at exactly seven, twice running.** The two runs that reported a
+count both got 7/20, which is the most informative thing about it: a timing
+race against a shared cloud runner would not land on the same number twice.
+Something is exhausted rather than delayed. A HiSLIP session is two TCP
+connections that the server pairs by session id, so fourteen connections into
+the churn is where to look -- a session-id or listener limit on the mock's
+side, or something the client is not releasing on close.
+
+**And the mock has exactly such a limit.** `server/src/hislip/server.rs` caps
+concurrent sessions at 16 and answers the seventeenth with a HiSLIP
+`FatalError` of `MaximumClientsExceeded` ("too many active sessions"). Sessions
+leave that registry through a `Drop` that spawns the removal, so a close whose
+teardown does not complete promptly leaves the entry behind. `04_concurrency`
+opens one session, then six in parallel, then churns -- which puts the count in
+the right neighbourhood by the seventh cycle if the earlier ones are not being
+reaped.
+
+That makes the mock the leading suspect, and this suite brings its own
+instrument precisely so that question gets asked. It is **not** yet settled:
+the arithmetic is suggestive rather than exact, and confirming it needs the
+server's own log, which the leg does not currently capture. Two things would
+settle it -- capturing the mock's stderr from a Windows leg, and running the
+same churn against a vendor VISA on the same host. If Keysight churns cleanly
+where pyvisa-py does not, the limit is not the explanation.
 
 The transport asymmetry is the useful part, because it holds *within a single
 run on a single machine*:
@@ -385,14 +410,10 @@ does not survive repetition.
 brings its own instrument, so that question has to be asked before the finding
 means anything. `VI_ERROR_RSRC_NFOUND` is what pyvisa-py raises when the HiSLIP
 `Instrument` constructor cannot establish its two sockets, and a fast
-close-then-reopen on Windows is equally consistent with:
-
-- the client not releasing or re-establishing something between sessions; or
-- the mock's HiSLIP listener not accepting a reconnect promptly on Windows,
-  where the sync and async channels are two separate connections that must be
-  paired by session id.
-
-The second is ours. Deciding between them wants a run against real hardware, or
+close-then-reopen on Windows is equally consistent with the client not
+releasing something between sessions and with the mock not reaping what the
+client released. The second is ours, and on the evidence above it is the more
+likely of the two. Deciding between them wants a run against real hardware, or
 against a vendor implementation on the same Windows host -- which is what the
 Keysight and TekVISA legs will give once their installers are provisioned. If
 NI or Keysight churns cleanly where pyvisa-py does not, the answer is the
