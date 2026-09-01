@@ -92,7 +92,21 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    raw = Path(args.plan).read_text(encoding="utf-8").strip()
+    if not raw:
+        # The plan job failed, and the aggregate runs with `if: always()`. Say
+        # which one broke: a JSONDecodeError here points at this file and the
+        # actual fault is two jobs upstream.
+        print(
+            f"{args.plan} is empty: the plan job produced no legs, so there is "
+            f"nothing to normalise. Look at that job, not this one.",
+            file=sys.stderr,
+        )
+        return 4
+    plan = json.loads(raw)
+    if not plan:
+        print("the plan lists no legs", file=sys.stderr)
+        return 4
     src, dst = Path(args.src), Path(args.dst)
 
     for protocol in PROTOCOLS:

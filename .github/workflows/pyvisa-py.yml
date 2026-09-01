@@ -70,7 +70,10 @@ jobs:
 
   aggregate:
     needs: [plan, linux, windows]
-    if: always()
+    # always(), so a leg that died still gets reported as a column -- but not
+    # when the plan itself failed, because then there is no list of legs to
+    # report against and the failure to look at is two jobs upstream.
+    if: always() && needs.plan.result == 'success' 
     uses: ./.github/workflows/_aggregate.yml
     with:
       plan: ${{ needs.plan.outputs.legs }}

@@ -27,7 +27,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pyvisa
+# pyvisa is imported lazily, inside the two functions that need it. The table
+# of which backends exist and where to get them is also read by the reporting
+# tools, which render a page on a machine that never talks to an instrument --
+# and making them install a VISA stack to look up a display name is the kind of
+# dependency that turns a five-second job into a minute.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -138,7 +142,7 @@ class Resolved:
     def name(self) -> str:
         return self.spec.name
 
-    def resource_manager(self) -> pyvisa.ResourceManager:
+    def resource_manager(self) -> "pyvisa.ResourceManager":
         """The one ResourceManager for this backend.
 
         ``pyvisa.ResourceManager`` is a singleton *per backend*, so every
@@ -149,6 +153,8 @@ class Resolved:
         """
         if not self.available:
             raise RuntimeError(f"{self.name} is not available here: {self.reason}")
+        import pyvisa
+
         return pyvisa.ResourceManager(self.locator)
 
 
@@ -250,6 +256,14 @@ def available_ids() -> list[str]:
     return [i for i in BACKENDS if resolve(i).available]
 
 
+def _pyvisa_version() -> str:
+    try:
+        import pyvisa
+    except ImportError as exc:  # pragma: no cover - a run always has it
+        return f"not importable ({exc})"
+    return pyvisa.__version__
+
+
 def provenance(resolved: Resolved) -> dict[str, str]:
     """Where the implementation under test came from.
 
@@ -262,7 +276,7 @@ def provenance(resolved: Resolved) -> dict[str, str]:
     info: dict[str, str] = {
         "backend": resolved.name,
         "locator": resolved.locator or "(unavailable)",
-        "pyvisa": pyvisa.__version__,
+        "pyvisa": _pyvisa_version(),
         "python": sys.version.split()[0],
         "platform": f"{_SYSTEM} {platform.release()}",
     }
