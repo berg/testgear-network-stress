@@ -227,33 +227,48 @@ def main() -> int:
         base_threads = threading.active_count()
         base_fds = visa.open_fd_count()
         cycles = max(10, args.iterations // 10)
-        for _ in range(cycles):
-            with open_session() as churn:
-                churn.query("*IDN?")
+        # Guarded: reopening the same resource in a tight loop is exactly where
+        # a transient resolution failure shows up -- VI_ERROR_RSRC_NFOUND on
+        # the seventh cycle, seen on Windows -- and an unguarded raise here
+        # takes the two leak checks below with it, so a churn that broke reads
+        # as a leak check that was never written.
+        completed = 0
+        with stats.attempt(
+            f"{cycles} open/close cycles all reopen the resource"
+        ) as churned:
+            for _ in range(cycles):
+                with open_session() as churn:
+                    churn.query("*IDN?")
+                completed += 1
+        if not churned:
+            stats.note(
+                f"the churn stopped after {completed}/{cycles} cycles, so the "
+                f"leak deltas below cover only those"
+            )
         time.sleep(1.0)  # give any lingering threads a chance to exit
 
         leaked_threads = threading.active_count() - base_threads
         stats.check(
             leaked_threads <= 1,
-            f"{cycles} open/close cycles leaked no threads "
+            f"{completed} open/close cycles leaked no threads "
             f"(delta {leaked_threads})",
         )
         # No fd directory to count on Windows. Saying so beats subtracting two
         # sentinels and reporting a delta of zero as a pass.
         if base_fds < 0:
             stats.skip(
-                f"{cycles} open/close cycles leaked no descriptors",
+                f"{completed} open/close cycles leaked no descriptors",
                 "this platform exposes no open-descriptor count",
             )
         else:
             leaked_fds = visa.open_fd_count() - base_fds
             stats.check(
                 leaked_fds <= 2,
-                f"{cycles} open/close cycles leaked no descriptors "
+                f"{completed} open/close cycles leaked no descriptors "
                 f"(delta {leaked_fds})",
             )
         stats.note(
-            f"after {cycles} cycles: {threading.active_count()} threads, "
+            f"after {completed} cycles: {threading.active_count()} threads, "
             f"{visa.open_fd_count()} fds"
         )
 

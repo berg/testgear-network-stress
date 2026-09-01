@@ -20,6 +20,33 @@ from pyvisa.constants import StatusCode  # noqa: E402
 from testgear import cli, harness, visa  # noqa: E402
 
 
+def clear_status(stats, lib, sess, where: str):
+    """viClear's status, or None if the library raised instead of returning one.
+
+    VPP-4.3 3.2.3 types viClear as returning a ViStatus, and a library that
+    raises out of it takes the script with it: upstream pyvisa-py answers a
+    device clear over HiSLIP by reading DeviceClearAcknowledge off the sync
+    channel while a stale DataEnd is still queued, and the bare RuntimeError
+    that follows used to end the run. Every check after it then vanished from
+    the column, which reads as "not applicable" rather than as a failure.
+
+    Recorded once per section rather than once per iteration -- the loops here
+    run twenty-five times and the finding is the same one each time.
+    """
+    try:
+        return visa.status(lib.clear, sess)
+    except visa.BadCall:
+        # Our mistake, not the backend's. Exit 5 is where that belongs.
+        raise
+    except Exception as exc:  # noqa: BLE001
+        stats.error(
+            f"viClear returns a status rather than raising ({where})",
+            exc,
+            rule="VPP-4.3 3.2.3",
+        )
+        return None
+
+
 def main() -> int:
     parser = cli.build_parser(__doc__.splitlines()[0])
     parser.set_defaults(iterations=50)
@@ -47,7 +74,10 @@ def main() -> int:
             # -- 1. clear on an idle session --------------------------------
             t0 = time.time()
             for i in range(args.iterations):
-                if visa.status(lib.clear, sess) != StatusCode.success:
+                status = clear_status(stats, lib, sess, "idle session")
+                if status is None:
+                    break
+                if status != StatusCode.success:
                     stats.error(f"iteration {i}: viClear failed")
                     break
                 got = inst.query("*IDN?").strip()
@@ -96,7 +126,10 @@ def main() -> int:
             if stale_value is not None:
                 for i in range(min(args.iterations, 25)):
                     lib.write(sess, probe.encode() + b"\n")
-                    if visa.status(lib.clear, sess) != StatusCode.success:
+                    status = clear_status(stats, lib, sess, "unread response")
+                    if status is None:
+                        break
+                    if status != StatusCode.success:
                         stats.error(f"unread-response iteration {i}: viClear failed")
                         break
                     got = inst.query("*IDN?").strip()
@@ -139,7 +172,10 @@ def main() -> int:
                             f"{0 if partial is None else len(partial)} bytes"
                         )
                         break
-                    if visa.status(lib.clear, sess) != StatusCode.success:
+                    status = clear_status(stats, lib, sess, "partial read")
+                    if status is None:
+                        break
+                    if status != StatusCode.success:
                         stats.error(f"partial-read iteration {i}: viClear failed")
                         break
                     got = inst.query("*IDN?").strip()
@@ -155,10 +191,19 @@ def main() -> int:
                     )
 
                 # -- 4. the large query still works afterwards ----------------
-                stats.check(
-                    inst.query(big_query) == reference,
-                    "large reads still intact after clears",
-                )
+                # Wrapped, because this is where a session left desynchronised
+                # by an earlier failed clear surfaces: the query raises rather
+                # than returning the wrong thing, and an unguarded call here
+                # loses the end-of-run error check below.
+                with stats.attempt(
+                    "large reads still intact after clears"
+                ) as intact:
+                    if inst.query(big_query) != reference:
+                        raise AssertionError(
+                            "the large query no longer returns its reference "
+                            "value"
+                        )
+                del intact
 
             visa.check_errors(inst, stats, "at end of run")
 
