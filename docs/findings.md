@@ -351,40 +351,65 @@ Reproduce:
 # "viClear returns a status rather than raising (unread response)"
 ```
 
-### Open/close churn intermittently fails to resolve the resource on Windows
+### HiSLIP reconnection fails partway through open/close churn, on Windows
 
-**Status:** open, **unconfirmed -- seen once**. Upstream `main` (`3cc4fe9`), on
-a `windows-latest` GitHub runner, over HiSLIP. Not reproduced on macOS or on
-Linux, and not yet reproduced a second time anywhere.
+**Status:** open, **side not yet determined**. Reproduced on both CI runs that
+have exercised it, on `windows-latest`, over HiSLIP, against upstream `main`
+(`3cc4fe9`).
 
-`04_concurrency` closes with ten open/close cycles against the same resource,
-checking that threads and descriptors are reclaimed. One cycle answered:
+`04_concurrency` ends by opening and closing the same resource twenty times,
+checking that threads and descriptors are reclaimed. On Windows the HiSLIP
+session stops being resolvable partway through:
 
 ```
 VisaIOError: VI_ERROR_RSRC_NFOUND (-1073807343)
 ```
 
-for a resource that had opened successfully nine times immediately before, and
-that the same run had been using throughout.
+after seven of the twenty cycles, for a resource that had opened successfully
+seven times immediately before and that the run had been using throughout.
 
-Recorded here because it is the kind of thing that is easy to lose -- it
-appeared in CI, on a platform nobody develops on, in a script that then aborted
-and reported nothing at all. It is deliberately **not** claimed as a pyvisa-py
-defect yet: a single observation on a shared cloud runner is equally consistent
-with a port that had not yet been released by the previous cycle, which would
-be an artifact of the mock or of the platform rather than a finding about the
-client. Telling those apart needs a second sighting.
+The transport asymmetry is the useful part, because it holds *within a single
+run on a single machine*:
 
-What has changed is that a second sighting will now be visible: the churn is
-wrapped, so the cycle count that completed is reported and the leak checks
-after it still run, instead of the script ending and the whole column going
-quiet.
+| | Linux | Windows |
+| --- | --- | --- |
+| HiSLIP | 20/20 | **7/20** |
+| VXI-11 | 20/20 | 20/20 |
+
+VXI-11 churns the same resource on the same runner in the same job and does
+not fail. So this is not the runner being slow or the mock being generally
+unavailable -- something specific to reopening a *HiSLIP* connection on Windows
+does not survive repetition.
+
+**Which side it belongs to is exactly what is not yet known**, and this suite
+brings its own instrument, so that question has to be asked before the finding
+means anything. `VI_ERROR_RSRC_NFOUND` is what pyvisa-py raises when the HiSLIP
+`Instrument` constructor cannot establish its two sockets, and a fast
+close-then-reopen on Windows is equally consistent with:
+
+- the client not releasing or re-establishing something between sessions; or
+- the mock's HiSLIP listener not accepting a reconnect promptly on Windows,
+  where the sync and async channels are two separate connections that must be
+  paired by session id.
+
+The second is ours. Deciding between them wants a run against real hardware, or
+against a vendor implementation on the same Windows host -- which is what the
+Keysight and TekVISA legs will give once their installers are provisioned. If
+NI or Keysight churns cleanly where pyvisa-py does not, the answer is the
+client; if nothing churns cleanly on Windows over HiSLIP, the answer is the
+mock.
+
+Recorded now rather than after that, because it is the kind of thing that gets
+lost: it appears only in CI, only on a platform nobody here develops on, and
+until the churn loop was wrapped it ended the script and reported nothing at
+all -- the second sighting exists only because the loop now says how many
+cycles it completed.
 
 Reproduce (Windows):
 
 ```powershell
 uv run python checks\04_concurrency.py --protocol hislip --pyvisa-py C:\path\to\upstream
-# "10 open/close cycles all reopen the resource"
+# "20 open/close cycles all reopen the resource"
 ```
 
 ### What the vendor runs settled
