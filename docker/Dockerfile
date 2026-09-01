@@ -32,16 +32,19 @@ RUN touch src/main.rs src/lib.rs && cargo build --release
 # ---------------------------------------------------------------------------
 FROM docker.io/library/ubuntu:22.04
 
-# `ni` or `rs`. Selects which installer step runs; everything else is shared.
+# `ni`, `rs`, or `py`. Selects which installer step runs; everything else is
+# shared. `py` installs no vendor library at all, which gives pyvisa-py's own
+# column an image built exactly like the vendors' -- same base, same Python,
+# same suite -- so a difference between the columns is a difference between the
+# implementations and not between two machines.
 ARG BACKEND=ni
 ENV BACKEND=${BACKEND}
 ENV DEBIAN_FRONTEND=noninteractive
 
-# git is not optional here. setuptools-scm shells out to it to derive
-# pyvisa-py's version at install time, and the provenance block shells out to
-# it again at run time to name the commit under test. Without it the install
-# fails outright and, if it did not, every report would be attributed to a
-# tree it could not identify.
+# git is not optional here. The provenance block shells out to it to name the
+# commit under test, and without it every report would be attributed to a tree
+# it could not identify. A result that cannot say what produced it is not
+# reproducible, and comparing trees is the whole point.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv git \
         ca-certificates curl gnupg \
@@ -117,23 +120,35 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 # -- python -----------------------------------------------------------------
-# pyvisa from pip; pyvisa-py from the tree under test, installed editable so
-# the provenance block reports the checkout and its commit rather than a
-# version stamped at package time.
-COPY pyvisa-py/ /pyvisa-py/
-# git refuses to operate on a repository owned by another user, which is what
-# a COPY-ed tree looks like. Without this, setuptools-scm sees no version and
-# the provenance block reports no commit.
-RUN git config --global --add safe.directory /pyvisa-py
+# pyvisa from pip, or from a git ref when a run wants to test what is current
+# rather than what is released.
+ARG PYVISA_REF=
 RUN python3 -m pip install --no-cache-dir --upgrade pip && \
-    python3 -m pip install --no-cache-dir pyvisa && \
-    python3 -m pip install --no-cache-dir -e /pyvisa-py
+    if [ -n "$PYVISA_REF" ]; then \
+        python3 -m pip install --no-cache-dir \
+            "git+https://github.com/pyvisa/pyvisa@${PYVISA_REF}"; \
+    else \
+        python3 -m pip install --no-cache-dir pyvisa; \
+    fi
+
+# pyvisa-py is NOT copied in. It is the tree under test, so baking it into the
+# image would invalidate every layer above it on each new commit -- and the
+# layer above it is NI's install, which pulls about a gigabyte from ni.com.
+# Mount the checkout at /pyvisa-py and pass --pyvisa-py, which puts it on both
+# sys.path and PYTHONPATH, so the subprocesses see it too.
+#
+# git refuses to operate on a repository owned by another user, which is what a
+# mounted tree looks like. Without this the provenance block reports no commit,
+# and a result that cannot name what produced it is not reproducible.
+RUN git config --global --add safe.directory /pyvisa-py
 
 WORKDIR /suite
 COPY testgear/ /suite/testgear/
 COPY checks/ /suite/checks/
 COPY reproducers/ /suite/reproducers/
-COPY compare.py run_all.sh /suite/
+COPY compare.py run_all.py run_all.sh /suite/
+COPY tools/ /suite/tools/
+COPY pyproject.toml /suite/
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --from=server /build/target/release/testgear-mock-server /usr/local/bin/
 

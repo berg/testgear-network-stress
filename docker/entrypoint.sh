@@ -46,6 +46,24 @@ banner "image: BACKEND=$BACKEND"
 echo "python: $(python3 --version 2>&1)"
 python3 -c 'import pyvisa; print("pyvisa:", pyvisa.__version__)' 2>&1 | tail -1
 
+# The tree under test is mounted, not baked in: it changes on every commit and
+# the layer above it in the image pulls a gigabyte from ni.com. Say plainly
+# whether it is there. Falling through to "backend not available" from deep
+# inside a check is the failure this whole file exists to prevent.
+PYVISA_PY_TREE=/pyvisa-py
+if [[ -f "$PYVISA_PY_TREE/pyvisa_py/__init__.py" ]]; then
+    export TESTGEAR_PYVISA_PY="$PYVISA_PY_TREE"
+    echo "pyvisa-py: $PYVISA_PY_TREE ($(git -C "$PYVISA_PY_TREE" describe --always --dirty --tags 2>/dev/null || echo 'not a checkout') on $(git -C "$PYVISA_PY_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?'))"
+else
+    echo "pyvisa-py: NOT MOUNTED at $PYVISA_PY_TREE"
+    echo "  Mount the checkout under test:"
+    echo "    -v /path/to/pyvisa-py:$PYVISA_PY_TREE:ro"
+    echo "  Nothing here installs pyvisa-py, so a run without it would test"
+    echo "  whatever happened to be importable -- which is the one result this"
+    echo "  suite must never produce."
+    [[ "${1:-check}" != "check" ]] && exit 4
+fi
+
 banner "VISA libraries present"
 found_any=0
 for candidate in \
@@ -70,11 +88,24 @@ fi
 
 banner "does the backend load?"
 python3 - <<'PY'
+import os
 import sys
 sys.path.insert(0, "/suite")
 from testgear import backends
 
-target = __import__("os").environ.get("BACKEND", "py")
+# The tree is mounted, so nothing has put it on sys.path yet. resolve("py")
+# is an import of pyvisa_py, and without this it would report "not importable"
+# for a checkout that is sitting right there -- which reads as a missing
+# install rather than as a probe that looked in the wrong place.
+tree = os.environ.get("TESTGEAR_PYVISA_PY")
+if tree:
+    try:
+        backends.use_pyvisa_py_tree(tree)
+    except backends.TreeError as exc:
+        print(f"  {exc}")
+        sys.exit(4)
+
+target = os.environ.get("BACKEND", "py")
 resolved = backends.resolve(target)
 print(f"  resolve({target!r}): available={resolved.available} locator={resolved.locator}")
 if not resolved.available:

@@ -26,6 +26,27 @@ import dataclasses
 STATUSES = ("ok", "unavailable", "errored", "not-run")
 
 
+#: Files that live beside the column reports and are not columns. Both the
+#: matrix tools glob `*.json`, and without this an exit-code sidecar written by
+#: the same run would be loaded as an implementation named "ni.rc" -- a column
+#: with no results, which is exactly the shape this code is careful to treat as
+#: "something did not run".
+NOT_COLUMNS = ("index.json",)
+NOT_COLUMN_SUFFIXES = (".rc.json",)
+
+
+def column_files(root) -> list:
+    """The report files in a directory, in name order, sidecars excluded."""
+    from pathlib import Path
+
+    return sorted(
+        p
+        for p in Path(root).glob("*.json")
+        if p.name not in NOT_COLUMNS
+        and not any(p.name.endswith(sfx) for sfx in NOT_COLUMN_SUFFIXES)
+    )
+
+
 def merge(reports: list[dict], label: str) -> dict:
     """Fold several script reports into one column.
 
@@ -60,6 +81,20 @@ def status(column: dict) -> str:
 
 def label(column: dict) -> str:
     return column.get("label") or column.get("context", {}).get("backend", "?")
+
+
+def display_labels(columns: list[dict]) -> list[str]:
+    """Labels, with the platform added wherever one alone is ambiguous.
+
+    pyvisa-py on Linux and pyvisa-py on Windows are two columns with one name.
+    Prose that lists them has to tell them apart -- "PyVISA-py, PyVISA-py
+    produced no results" names neither.
+    """
+    names = [label(c) for c in columns]
+    return [
+        f"{n} ({c.get('os_label')})" if names.count(n) > 1 and c.get("os_label") else n
+        for n, c in zip(names, columns)
+    ]
 
 
 @dataclasses.dataclass
@@ -120,27 +155,43 @@ class Matrix:
     def all_skipped(self) -> list[Row]:
         return [r for r in self.rows if r.all_skipped]
 
-    def unique_failures(self, subject: str = "PyVISA-py") -> list[Row]:
-        """Rows where `subject` fails and every other compared column passes.
+    def subject_columns(self, subject: str = "py") -> list[int]:
+        """Which compared columns are the implementation under test.
+
+        More than one column can be the same implementation -- pyvisa-py on
+        Linux and on Windows is the useful case, because it gives every
+        cross-OS disagreement a same-OS control. They are one subject, so
+        `backend` is matched before the display label, which is identical for
+        both.
+        """
+        by_backend = [
+            i for i in self.compared if self.columns[i].get("backend") == subject
+        ]
+        if by_backend:
+            return by_backend
+        return [i for i in self.compared if label(self.columns[i]) == subject]
+
+    def unique_failures(self, subject: str = "py") -> list[Row]:
+        """Rows the subject fails everywhere and every other column passes.
 
         This used to be spelled `len(outcomes) == 3 and outcomes == [FAIL,
         PASS, PASS]`, which silently counted nothing as soon as a fourth
-        implementation joined the matrix -- and counted the wrong thing if the
+        implementation joined the matrix, and counted the wrong thing if the
         columns were ever reordered.
+
+        Every subject column has to fail. A check that fails under pyvisa-py on
+        Linux and passes under pyvisa-py on Windows is telling you about the
+        platform, not about the library, and it does not belong in a list
+        headed "confirmed findings".
         """
-        try:
-            at = next(
-                i for i in self.compared if label(self.columns[i]) == subject
-            )
-        except StopIteration:
-            return []
-        others = [i for i in self.compared if i != at]
-        if not others:
+        subjects = self.subject_columns(subject)
+        others = [i for i in self.compared if i not in subjects]
+        if not subjects or not others:
             return []
         return [
             r
             for r in self.rows
-            if r.outcomes[at] == "FAIL"
+            if all(r.outcomes[i] == "FAIL" for i in subjects)
             and all(r.outcomes[i] == "PASS" for i in others)
         ]
 
@@ -230,13 +281,14 @@ def render_markdown(
     matrix: Matrix,
     protocol: str,
     *,
-    subject: str = "PyVISA-py",
+    subject: str = "py",
     max_rows: int = 60,
 ) -> str:
     """One transport's results as GitHub-flavoured Markdown."""
     out: list[str] = [f"## {protocol}", ""]
 
     # -- what each column did, including the ones that did nothing ----------
+    shown = display_labels(matrix.columns)
     counts = []
     for i, column in enumerate(matrix.columns):
         st = status(column)
@@ -267,7 +319,7 @@ def render_markdown(
         ]
 
     headers = ["Check"] + [
-        _md_escape(label(matrix.columns[i])) for i in matrix.compared
+        _md_escape(shown[i]) for i in matrix.compared
     ] + ["Rule"]
 
     def section(title: str, rows: list[Row], blurb: str = "") -> None:
@@ -285,10 +337,14 @@ def render_markdown(
 
     unique = matrix.unique_failures(subject)
     unique_keys = {r.key for r in unique}
+    subject_name = next(
+        (label(matrix.columns[i]) for i in matrix.subject_columns(subject)), subject
+    )
     section(
-        f"Failures unique to {subject}",
+        f"Failures unique to {subject_name}",
         unique,
-        f"Checks {subject} fails that every other implementation here passes.",
+        f"Checks {subject_name} fails, on every platform it ran on, that every "
+        "other implementation here passes.",
     )
     section(
         "Where the implementations disagree",

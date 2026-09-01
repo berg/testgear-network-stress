@@ -30,7 +30,7 @@ def main() -> int:
     columns = []
     # pyvisa-py first: it is the subject, and the eye reads left to right.
     for path in sorted(
-        Path(args.directory).glob("*.json"),
+        aggregate.column_files(args.directory),
         key=lambda p: (p.stem != "py", p.stem),
     ):
         loaded = json.loads(path.read_text())

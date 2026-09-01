@@ -223,9 +223,9 @@ def load(root: Path) -> list[dict]:
         planned = planned.get("columns", planned)
     else:
         planned = [
-            {"id": path.stem, "file": path.name}
+            {"id": path.stem, "backend": path.stem, "file": path.name}
             for path in sorted(
-                (p for p in root.glob("*.json") if p.name != "index.json"),
+                aggregate.column_files(root),
                 key=lambda p: (
                     FALLBACK_ORDER.index(p.stem)
                     if p.stem in FALLBACK_ORDER
@@ -256,6 +256,10 @@ def load(root: Path) -> list[dict]:
 
         column["label"] = entry.get("label") or column.get("label") or default_label
         column["short"] = column["label"]
+        # The backend id, not the label, is what identifies the subject: two
+        # columns can be the same implementation on different platforms and
+        # carry the same label.
+        column["backend"] = entry.get("backend", entry.get("id", ""))
         for key in ("id", "os_label", "vendor_version", "status", "reason"):
             if entry.get(key):
                 column[key] = entry[key]
@@ -279,17 +283,33 @@ def render_protocol(protocol: str, cols, out, prose: dict) -> None:
     ) or {}
     w('<section class="proto-block">')
     w(f'<h2 class="proto">{esc(titles.get(protocol, protocol))}</h2>')
+    subject_name = next(
+        (aggregate.label(cols[i]) for i in matrix.subject_columns()), "PyVISA-py"
+    )
     lede = (
         f"{len(matrix.rows)} checks. {len(matrix.disagreements)} differ between "
-        f"implementations, {len(unique)} of them failures unique to PyVISA-py."
+        f"implementations, {len(unique)} of them failures unique to "
+        f"{subject_name}."
     )
     if matrix.all_skipped:
         lede += f" {len(matrix.all_skipped)} could not run anywhere."
+    if len(matrix.compared) < 2:
+        # compare.py says the same thing when it is handed one backend. A grid
+        # with a single column is a report, and calling its zero disagreements
+        # a result would be claiming agreement with nobody.
+        lede = (
+            f"{len(matrix.rows)} checks from a single implementation. "
+            f"Nothing was compared, so this section is a report rather than a "
+            f"comparison."
+        )
     if dead:
         # Said out loud, not just left as an empty column. The whole reason a
         # dead column is drawn at all is that its absence would read as
         # agreement between the implementations that did answer.
-        names = ", ".join(aggregate.label(c) for c in dead)
+        shown = aggregate.display_labels(cols)
+        names = ", ".join(
+            shown[i] for i, c in enumerate(cols) if aggregate.status(c) != "ok"
+        )
         lede += (
             f" {names} produced no results, so the counts above compare only "
             f"the rest."
@@ -479,7 +499,7 @@ def main() -> int:
     # The eyebrow names the columns, so it has to be generated. It used to be a
     # literal, which meant a fourth implementation could join the matrix and
     # the masthead would still claim there were three.
-    named = " &middot; ".join(esc(aggregate.label(c)) for c in first)
+    named = " &middot; ".join(esc(n) for n in aggregate.display_labels(first))
     w('<header class="mast">')
     w(f'<div class="eyebrow">{named}</div>')
     title = prose.get("title", "VISA Conformance Matrix")
