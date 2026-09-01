@@ -20,7 +20,7 @@ from pyvisa.constants import StatusCode  # noqa: E402
 from testgear import cli, harness, visa  # noqa: E402
 
 
-def clear_status(stats, lib, sess, where: str):
+def clear_status(stats, lib, sess, check: str, rule: str = "VPP-4.3 3.2.3"):
     """viClear's status, or None if the library raised instead of returning one.
 
     VPP-4.3 3.2.3 types viClear as returning a ViStatus, and a library that
@@ -30,8 +30,14 @@ def clear_status(stats, lib, sess, where: str):
     that follows used to end the run. Every check after it then vanished from
     the column, which reads as "not applicable" rather than as a failure.
 
-    Recorded once per section rather than once per iteration -- the loops here
-    run twenty-five times and the finding is the same one each time.
+    The failure is recorded against the section's own check name rather than
+    under a name of its own, so the row lines up with the implementations that
+    pass it -- both vendors do. A separate name would leave a gap in their row
+    and a gap in this one, and neither would read as a disagreement. The raise
+    goes in the detail, where the evidence belongs.
+
+    Recorded once per section rather than once per iteration: the loops here
+    run twenty-five times and it is the same finding each time.
     """
     try:
         return visa.status(lib.clear, sess)
@@ -39,10 +45,12 @@ def clear_status(stats, lib, sess, where: str):
         # Our mistake, not the backend's. Exit 5 is where that belongs.
         raise
     except Exception as exc:  # noqa: BLE001
-        stats.error(
-            f"viClear returns a status rather than raising ({where})",
-            exc,
-            rule="VPP-4.3 3.2.3",
+        stats.check(
+            False,
+            check,
+            rule=rule,
+            detail=f"viClear raised instead of returning a status: "
+            f"{type(exc).__name__}: {exc}",
         )
         return None
 
@@ -74,7 +82,9 @@ def main() -> int:
             # -- 1. clear on an idle session --------------------------------
             t0 = time.time()
             for i in range(args.iterations):
-                status = clear_status(stats, lib, sess, "idle session")
+                status = clear_status(
+                    stats, lib, sess, f"{args.iterations} clear/query cycles"
+                )
                 if status is None:
                     break
                 if status != StatusCode.success:
@@ -126,7 +136,9 @@ def main() -> int:
             if stale_value is not None:
                 for i in range(min(args.iterations, 25)):
                     lib.write(sess, probe.encode() + b"\n")
-                    status = clear_status(stats, lib, sess, "unread response")
+                    status = clear_status(
+                        stats, lib, sess, "clear discards an uncollected response"
+                    )
                     if status is None:
                         break
                     if status != StatusCode.success:
@@ -172,7 +184,9 @@ def main() -> int:
                             f"{0 if partial is None else len(partial)} bytes"
                         )
                         break
-                    status = clear_status(stats, lib, sess, "partial read")
+                    status = clear_status(
+                        stats, lib, sess, "clear resyncs mid-message"
+                    )
                     if status is None:
                         break
                     if status != StatusCode.success:
