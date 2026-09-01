@@ -78,6 +78,20 @@ sidecars.
 | 4 | setup error | no — reported as an unavailable column |
 | 5 | this suite made a bad VISA call | yes — our bug |
 
+Exit 2 should be rare, and getting there took work. `run_checks` has always
+turned an exception inside a registered check into a FAIL, but the imperative
+setup *between* checks had no such net: a library that raised where the spec
+says it returns a status took the whole script with it, and every check after
+it vanished from the column — which reads as "not applicable" rather than as a
+failure. `Stats.attempt` is that net, and the three scripts that were aborting
+against upstream pyvisa-py main now record the raise as a FAIL, cite the clause
+it breaks, and carry on. One of those crashes turned out to be concealing four
+further failures behind it.
+
+So exit 2 now means what it says: something broke that no check was watching.
+If a new one appears, the fix is usually to put the offending call inside an
+`attempt` and give it a clause, not to catch it more broadly.
+
 Plus a regression against `docs/ci-baseline.json`: a check the baseline records
 as passing that now fails **or now skips**. A new skip counts, deliberately —
 in the suite this one grew out of, the large-reply checks stayed skipped
