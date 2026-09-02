@@ -174,6 +174,57 @@ RUN set -eux; \
         bash /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh \
             /opt/keysight/iolibs "Ubuntu" || echo "  (still unhappy; the run will say so)"; \
     fi; \
+    # -- let their own post-install run -----------------------------------
+    #
+    # Their suite installer fails to install KDI and the discovery service, and
+    # without the discovery service there is no TCPIP0 to open. Both failures
+    # are container artefacts, and neither is really about Keysight:
+    #
+    # DistributedInfrastructureService is Go using kardianos/service, and it
+    #   logs to syslog. With no /dev/log socket it dies with "Unix syslog
+    #   delivery error" -- which *masks* the real error and sends you chasing
+    #   the logger instead of the fault.
+    #
+    # kardianos/service also picks its init backend by looking for
+    #   /run/systemd/system. Absent, it falls through to sysv-init and runs
+    #   `service <name> start`, which fails, so the post-install aborts before
+    #   writing /var/lib/keysight/Distributed Infrastructure/version.ini -- the
+    #   marker the discovery-service installer checks for.
+    #
+    # Give it a syslog sink and that directory and it takes the systemd path,
+    # where the systemctl stub above answers. Their post-install then completes
+    # and writes the marker itself, which beats forging it: the file wants a
+    # section named for the product as the installer names it, [KDI], and
+    # guessing that is how an afternoon goes.
+    mkdir -p /run/systemd/system; \
+    python3 -c "import socket,os,threading,time;\
+os.path.exists('/dev/log') and os.unlink('/dev/log');\
+s=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM);s.bind('/dev/log');\
+threading.Thread(target=lambda:[s.recv(8192) for _ in iter(int,1)],daemon=True).start();\
+time.sleep(3600)" & \
+    syslog_pid=$!; \
+    sleep 2; \
+    ( cd /opt/keysight/iolibs/coreq_installers && \
+      ./KDI-linux-x64-installer.run --mode unattended --unattendedmodeui minimal \
+          --force true >/tmp/kdi-install2.log 2>&1 ) \
+      || echo "KDI install still unhappy; see /tmp/kdi-install2.log"; \
+    test -s "/var/lib/keysight/Distributed Infrastructure/version.ini" \
+        && echo "KDI post-install wrote its marker:" \
+        && cat "/var/lib/keysight/Distributed Infrastructure/version.ini" \
+        || echo "NO KDI MARKER -- the discovery service will refuse to install"; \
+    ( cd "/opt/keysight/Distributed Infrastructure" && ./kdi-controller >/tmp/kdi-build.log 2>&1 & ) ; \
+    sleep 8; \
+    ( cd /opt/keysight/iolibs/coreq_installers && \
+      ./discovery-service-linux-x64-installer.run --mode unattended \
+          --unattendedmodeui minimal --force true --interfaces lan \
+          >/tmp/ds-install.log 2>&1 ) \
+      || echo "discovery-service install failed; see /tmp/ds-install.log"; \
+    pkill -f kdi-controller || true; \
+    kill "$syslog_pid" 2>/dev/null || true; \
+    rm -f /dev/log; \
+    test -x /opt/keysight/iolibs/ds/io-ds \
+        && echo "discovery service installed: io-ds" \
+        || echo "NO io-ds -- TCPIP0 will not resolve and the run will say so"; \
     ldconfig || true; \
     rm -rf /var/lib/apt/lists/*; \
     echo "installed Keysight libraries:"; \

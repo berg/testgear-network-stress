@@ -53,6 +53,59 @@ start_ni_daemons() {
 # systemctl, which in this image is the stub the NI install needed. So start
 # the binaries directly, the same way start_ni_daemons does.
 start_keysight_services() {
+    # First, and by far the most important line in this function.
+    #
+    # libktvisa32 blocks inside viOpenDefaultRM waiting on two named events --
+    # "IO libraries ready for IO" and "viFindRsrc ready" -- which a normal
+    # installation has the IO Control service set at boot. With no systemd
+    # there is nobody to set them, and the wait is not short: it times out
+    # after exactly 240 seconds and then carries on regardless. Seventeen
+    # scripts times two transports times four minutes is the difference
+    # between a leg that runs and a leg that never finishes.
+    #
+    # SetIOEvents sets them directly. viOpenDefaultRM goes from 240.1s to 0.1s.
+    if [[ -x /opt/keysight/iolibs/SetIOEvents ]]; then
+        (cd /opt/keysight/iolibs && ./SetIOEvents) || \
+            echo "SetIOEvents failed; expect a 240s stall in every viOpenDefaultRM"
+    else
+        echo "no SetIOEvents binary: viOpenDefaultRM will stall 240s per process"
+    fi
+
+    # These services are Go, using kardianos/service, and they log to syslog.
+    # With no /dev/log they fail with "Unix syslog delivery error" -- which is
+    # worse than it sounds, because it masks whatever the real error was. A
+    # sink that reads and discards is enough; /run/systemd/system makes the
+    # same library take the systemd path, where the stub above answers.
+    mkdir -p /run/systemd/system
+    if [[ ! -S /dev/log ]]; then
+        python3 -c "import socket,os,threading,time
+os.path.exists('/dev/log') and os.unlink('/dev/log')
+s=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM); s.bind('/dev/log')
+threading.Thread(target=lambda:[s.recv(8192) for _ in iter(int,1)],daemon=True).start()
+time.sleep(86400)" >/dev/null 2>&1 &
+        sleep 1
+    fi
+
+    # KDI first: the discovery service registers itself with it.
+    if [[ -x "/opt/keysight/Distributed Infrastructure/kdi-controller" ]]; then
+        (cd "/opt/keysight/Distributed Infrastructure" && \
+            ./kdi-controller >/tmp/kdi-controller.log 2>&1 &)
+        echo "started kdi-controller"
+        sleep 3
+    fi
+
+    # Then the discovery service, which is what actually registers TCPIP0.
+    # Without it viOpenDefaultRM succeeds and every viOpen answers
+    # VI_ERROR_INTF_NUM_NCONFIG. Their own post-install cannot start it: it
+    # calls `io-ds -service start`, and io-ds rejects that flag exactly as
+    # DistributedInfrastructureService rejects it.
+    if [[ -x /opt/keysight/iolibs/ds/io-ds ]]; then
+        (cd /opt/keysight/iolibs/ds && ./io-ds >/tmp/io-ds.log 2>&1 &)
+        echo "started io-ds (instrument discovery)"
+    else
+        echo "no io-ds: TCPIP0 will not resolve"
+    fi
+
     local started=0
     for service in /opt/keysight/iolibs/services/*; do
         [[ -x "$service" ]] || continue
