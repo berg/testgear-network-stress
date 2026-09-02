@@ -171,6 +171,16 @@ RUN set -eux; \
     timeout 1800 /tmp/iols.run --mode unattended --unattendedmodeui none \
         --enable-components iio,iom,lan,interfaces </dev/null \
         || echo "IOLS install failed or timed out; the run will report the backend missing"; \
+    # The installer prints nothing at all while it works -- 174s of silence on
+    # an idle 8-core box, longer on a runner -- so silence is not evidence of a
+    # hang, and its own logs are the only account of what happened. Surface the
+    # interesting lines rather than leaving them inside the image for someone
+    # to go looking for.
+    for log in /tmp/kt_iols_suite_install_linux-x64.log /tmp/kt_iols_visa_install_linux-x64.log; do \
+        [ -f "$log" ] || continue; \
+        echo "--- $(basename "$log")"; \
+        grep -iE "error|fail|prerequisite|not found" "$log" | head -8 || true; \
+    done; \
     rm -f /tmp/iols.run; \
     # Their own scripts ship with CRLF line endings and will not parse on
     # Linux: kt_iolsvisa_postinstall.sh dies on line 3 with $'\r': command not
