@@ -208,4 +208,30 @@ all confirmed. What has not:
 
 ## Provisioning
 
-See [`../infra/aws/REQUIREMENTS.md`](../infra/aws/REQUIREMENTS.md).
+The AWS side -- the private bucket, the GitHub Actions OIDC provider, and the
+read-only role -- is Pulumi, in a separate private repository. It is the source
+of truth and carries its own reasoning; there is deliberately no second copy of
+that description here to drift out of date.
+
+What CI expects to find, and nothing more:
+
+| | |
+| --- | --- |
+| `AWS_ROLE_ARN` | repository **secret** -- masked, because it embeds the account id |
+| `VENDOR_BUCKET` | repository **secret**, same reason |
+| `AWS_REGION` | repository variable; a region is not sensitive |
+| `vendor-drivers` | GitHub Environment, deployment branches restricted to `main` |
+
+Two things about the role that are worth stating because getting either wrong
+is silent:
+
+- Its OIDC trust condition matches the subject GitHub actually sends, which
+  embeds **immutable database ids** rather than names:
+  `repo:owner@ID/repo@ID:environment:vendor-drivers`. A policy written against
+  the plain-name form matches nothing, and the failure is a bare
+  `Not authorized to perform sts:AssumeRoleWithWebIdentity` that says nothing
+  about the subject. CloudTrail records the claims that arrived; that is where
+  to look.
+- It has no `PutObject`. Uploading a driver is a human with their own
+  credentials running `tools/upload_vendor.py`, which is also what writes the
+  manifest, so a checksum cannot drift from the file it describes.
