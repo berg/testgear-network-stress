@@ -36,9 +36,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from testgear import aggregate, backends  # noqa: E402
 
-#: Fallback column order when a directory has no index.json: pyvisa-py first,
-#: because it is the subject and the eye reads left to right, then the rest in
-#: the order the backend table lists them.
+#: Fallback column order when a directory has no index.json. Only used to make
+#: a hand-run directory deterministic; `load` sorts by display label either
+#: way, and deliberately does not put any one implementation first.
 FALLBACK_ORDER = list(backends.BACKENDS)
 
 HERE = Path(__file__).resolve().parent.parent
@@ -131,7 +131,7 @@ tr.differs td:first-child{box-shadow:inset 3px 0 0 var(--stripe)}
    implementation passes. A thicker stripe, because "disagrees with a shipping
    implementation of the same spec" is a much stronger claim than "disagrees
    with the others somehow". */
-tr.pyonly td:first-child{box-shadow:inset 5px 0 0 var(--fail)}
+tr.only-one td:first-child{box-shadow:inset 5px 0 0 var(--fail)}
 /* The check name links to the line that asserts it. Underlined only on hover:
    every row would otherwise be a wall of blue. */
 a.src{color:var(--muted);text-decoration:none;font-family:var(--mono);
@@ -141,6 +141,18 @@ tr.grp a.src{opacity:1;color:inherit;font-family:inherit;font-size:inherit}
 .grp-time{float:right;font-family:var(--mono);font-size:.68rem;
   color:var(--muted);font-weight:400}
 tr.allskip{background:var(--skip-wash)}
+.standouts{margin:.9rem 0 0}
+details.standout{margin:0 0 .35rem;font-size:.85rem}
+details.standout > summary{cursor:pointer;font-weight:600}
+details.standout .lede{margin:.5rem 0 0;color:var(--muted);font-size:.82rem}
+details.standout dl,details.standout dt{margin-top:.5rem;font-weight:600}
+details.standout dd{margin:.15rem 0 0;color:var(--muted);
+  font-family:var(--mono);font-size:.75rem;overflow-wrap:anywhere}
+details.skipped-all{margin:.9rem 0 0;font-size:.85rem}
+details.skipped-all summary{cursor:pointer;color:var(--muted)}
+details.skipped-all dt{margin-top:.5rem;font-weight:600}
+details.skipped-all dd{margin:.15rem 0 0;color:var(--muted);
+  overflow-wrap:anywhere}
 .check{max-width:34rem}
 .rule{font-family:var(--mono);font-size:.68rem;color:var(--muted);display:block;
   margin-top:.1rem}
@@ -257,8 +269,18 @@ def load(root: Path) -> list[dict]:
             )
         ]
 
+    # Alphabetically by the label a reader sees, not by the plan's run order.
+    # The plan lists pyvisa-py first because it is the leg that runs on every
+    # trigger, and the page inherited that as "the subject, leftmost, read
+    # first" -- which is an editorial claim the column order should not be
+    # making. Four implementations are being compared; none of them is the
+    # premise.
+    def _label_of(entry: dict) -> str:
+        spec = backends.BACKENDS.get(entry.get("backend", entry.get("id", "")))
+        return (entry.get("label") or (spec.name if spec else entry.get("id", "?"))).lower()
+
     cols: list[dict] = []
-    for entry in sorted(planned, key=lambda e: e.get("order", 0)):
+    for entry in sorted(planned, key=_label_of):
         spec = backends.BACKENDS.get(entry.get("backend", entry.get("id", "")))
         default_label = spec.name if spec else entry.get("id", "?")
         path = root / entry.get("file", f"{entry.get('id', '')}.json")
@@ -295,9 +317,26 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
     titles = prose.get("protocol_titles", {})
     versions = prose.get("versions", {})
 
-    groups = matrix.by_script()
-    unique = matrix.unique_failures()
-    unique_keys = {r.key for r in unique}
+    # A row every implementation skipped is a row about the suite, not about
+    # the implementations: usually a feature the transport does not have, so
+    # all four say SKIP for the same reason and the row carries no comparison.
+    # Left in the table they were pure noise -- and on VXI-11 there are a lot
+    # of them. Hidden from the grid, listed under it: still auditable, since a
+    # skip nobody can see is the failure mode this suite exists to avoid.
+    hidden = {r.key for r in matrix.all_skipped}
+    groups = {
+        script: kept
+        for script, rows in matrix.by_script().items()
+        if (kept := [r for r in rows if r.key not in hidden])
+    }
+    by_column = matrix.unique_failures_by_column()
+    shared = matrix.shared_failures()
+    # Any row exactly one implementation fails, whichever it is. The marker
+    # used to mean "pyvisa-py alone fails this"; it now means "one of these
+    # four stands alone here", which is the interesting shape regardless of
+    # whose column it is.
+    unique_keys = {r.key for rows in by_column.values() for r in rows}
+    unique = [r for r in matrix.rows if r.key in unique_keys]
     dead = [c for c in cols if aggregate.status(c) != "ok"]
     # Only worth showing when it separates two columns. Every leg is Linux
     # today, and stamping LINUX on all four of them is noise that reads as
@@ -309,16 +348,20 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
     ) or {}
     w('<section class="proto-block">')
     w(f'<h2 class="proto">{esc(titles.get(protocol, protocol))}</h2>')
-    subject_name = next(
-        (aggregate.label(cols[i]) for i in matrix.subject_columns()), "PyVISA-py"
-    )
     lede = (
         f"{len(matrix.rows)} checks. {len(matrix.disagreements)} differ between "
-        f"implementations, {len(unique)} of them failures unique to "
-        f"{subject_name}."
+        f"implementations, {len(unique)} of them failed by exactly one."
     )
+    if shared:
+        lede += (
+            f" {len(shared)} are failed by all of them, which is usually the "
+            f"suite's problem rather than theirs."
+        )
     if matrix.all_skipped:
-        lede += f" {len(matrix.all_skipped)} could not run anywhere."
+        lede += (
+            f" {len(matrix.all_skipped)} could not run anywhere and are listed "
+            f"below the table rather than in it."
+        )
     # Stated separately from a dead column. These produced results and they are
     # trustworthy; it is the checks that are missing, and a gap reads as "not
     # applicable" unless something says otherwise.
@@ -398,7 +441,10 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
         # PyVISA-py on Linux" is a weaker claim than the same-OS one, and a
         # column header that does not say which is which invites the stronger
         # reading.
-        os_label = column.get("os_label")
+        # Only when it distinguishes something. Every leg is Linux, so the
+        # tag under every heading said the same word four times and cost the
+        # narrow column its width.
+        os_label = column.get("os_label") if show_os else None
         os_html = f'<span class="os">{esc(os_label)}</span>' if os_label else ""
         return f'<th class="st">{esc(column["short"])}{os_html}</th>'
 
@@ -460,7 +506,7 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
             elif row.all_skipped:
                 classes.append("allskip")
             if row.key in unique_keys:
-                classes.append("pyonly")
+                classes.append("only-one")
             if details:
                 classes.append("expandable")
             rule_html = (
@@ -508,6 +554,65 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
                   f'<td class="check"><span class="caret spacer"></span>'
                   f'{name}{rule_html}</td>{"".join(cells)}</tr>')
     w("</tbody></table></div>")
+
+    def row_list(rows) -> None:
+        w("<dl>")
+        for row in rows:
+            href = ""
+            if source_url and row.source:
+                href = f"{source_url.rstrip('/')}/{row.file}"
+                if row.line:
+                    href += f"#L{row.line}"
+            name = esc(row.label)
+            if href:
+                name += (
+                    f' <a class="src" href="{esc(href)}" '
+                    f'title="{esc(row.source)}">[source]</a>'
+                )
+            w(f"<dt>{name}</dt>")
+            reasons = sorted({reason(c) for c in row.cells if c and reason(c).strip()})
+            w(f"<dd>{esc(summary_line(' / '.join(reasons))) or '&mdash;'}</dd>")
+        w("</dl>")
+
+    # Once per implementation, not once for the subject. A vendor failing what
+    # the other three pass is the same finding as pyvisa-py doing it, and the
+    # page said so for one of them only.
+    if by_column or shared:
+        w('<div class="standouts">')
+        for index, rows in by_column.items():
+            w("<details class=\"standout\">")
+            w(f"<summary>{len(rows)} failure{'' if len(rows) == 1 else 's'} "
+              f"unique to {esc(aggregate.label(cols[index]))}</summary>")
+            w(f'<p class="lede">Checks {esc(aggregate.label(cols[index]))} '
+              f"fails that every other implementation here passes.</p>")
+            row_list(rows)
+            w("</details>")
+        if shared:
+            w("<details class=\"standout\">")
+            w(f"<summary>{len(shared)} failure{'' if len(shared) == 1 else 's'} "
+              f"shared by every implementation</summary>")
+            w('<p class="lede">Four independent implementations agreeing on a '
+              "failure usually means the check is asserting more than the "
+              "clause requires, or the mock is wrong. Read these as questions "
+              "about the suite before questions about the libraries.</p>")
+            row_list(shared)
+            w("</details>")
+        w("</div>")
+
+    if matrix.all_skipped:
+        w("<details class=\"skipped-all\">")
+        n = len(matrix.all_skipped)
+        w(f"<summary>{n} check{'' if n == 1 else 's'} no implementation could "
+          f"run</summary>")
+        w("<dl>")
+        for row in matrix.all_skipped:
+            reasons = sorted(
+                {reason(c) for c in row.cells if c and reason(c).strip()}
+            )
+            w(f"<dt>{esc(row.label)}</dt>")
+            w(f"<dd>{esc(' / '.join(reasons)) or '&mdash;'}</dd>")
+        w("</dl></details>")
+
     w("</section>")
 
 
@@ -610,8 +715,8 @@ def main() -> int:
 
     w('<section class="findings">')
     w("<h4>Confirmed findings</h4>")
-    w('<p class="lede" style="margin-bottom:.8rem">Checks PyVISA-py fails that '
-      "both NI-VISA and R&amp;S VISA pass.</p>")
+    w('<p class="lede" style="margin-bottom:.8rem">Written up from the '
+      "per-implementation lists above, with the clause each one cites.</p>")
     w('<div class="scroll"><table><tbody>')
     for entry in prose.get("findings", []):
         w(f"<tr><td>{entry['clause']}</td><td>{entry['text']}</td></tr>")

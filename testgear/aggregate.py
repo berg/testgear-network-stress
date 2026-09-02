@@ -198,7 +198,13 @@ class Matrix:
         return [r for r in self.rows if r.all_skipped]
 
     def subject_columns(self, subject: str = "py") -> list[int]:
-        """Which compared columns are the implementation under test.
+        """Which compared columns are one named implementation.
+
+        Used by the CI gate, which asks about one leg against its baseline and
+        is the one place a subject genuinely exists. The published page has no
+        subject: it compares four implementations, and `unique_failures_by_
+        column` asks the same question of each.
+
 
         More than one column can be the same implementation -- pyvisa-py on
         Linux and on Windows is the useful case, because it gives every
@@ -213,28 +219,47 @@ class Matrix:
             return by_backend
         return [i for i in self.compared if label(self.columns[i]) == subject]
 
-    def unique_failures(self, subject: str = "py") -> list[Row]:
-        """Rows the subject fails everywhere and every other column passes.
+    def unique_failures_by_column(self) -> "collections.OrderedDict[int, list[Row]]":
+        """Per column, the rows only that column fails.
 
-        This used to be spelled `len(outcomes) == 3 and outcomes == [FAIL,
-        PASS, PASS]`, which silently counted nothing as soon as a fourth
-        implementation joined the matrix, and counted the wrong thing if the
-        columns were ever reordered.
-
-        Every subject column has to fail. A check that fails under pyvisa-py on
-        Linux and passes under pyvisa-py on Windows is telling you about the
-        platform, not about the library, and it does not belong in a list
-        headed "confirmed findings".
+        The page used to ask this of pyvisa-py alone, which made the whole
+        matrix an argument about one implementation. It is the same question
+        for every column, and asking it of all of them is what turns the page
+        from "how is pyvisa-py doing" into "how do these four compare" -- which
+        is what a conformance matrix is for. A vendor failing something the
+        other three pass is exactly as interesting, and until now the page did
+        not say it anywhere.
         """
-        subjects = self.subject_columns(subject)
-        others = [i for i in self.compared if i not in subjects]
-        if not subjects or not others:
+        found: "collections.OrderedDict[int, list[Row]]" = collections.OrderedDict()
+        for i in self.compared:
+            others = [j for j in self.compared if j != i]
+            if not others:
+                continue
+            rows = [
+                r
+                for r in self.rows
+                if r.outcomes[i] == "FAIL"
+                and all(r.outcomes[j] == "PASS" for j in others)
+            ]
+            if rows:
+                found[i] = rows
+        return found
+
+    def shared_failures(self) -> list[Row]:
+        """Rows every compared column fails.
+
+        Not a comparison between implementations but a statement about the
+        check: four independent implementations agreeing on a failure usually
+        means the suite is asserting something the spec does not require, or
+        the mock is wrong. Worth its own list for exactly that reason -- and it
+        is how the `HiSLIPConnectionLost` bug was found.
+        """
+        if len(self.compared) < 2:
             return []
         return [
             r
             for r in self.rows
-            if all(r.outcomes[i] == "FAIL" for i in subjects)
-            and all(r.outcomes[i] == "PASS" for i in others)
+            if all(r.outcomes[i] == "FAIL" for i in self.compared)
         ]
 
     def counts(self, index: int) -> collections.Counter:
@@ -330,7 +355,6 @@ def render_markdown(
     matrix: Matrix,
     protocol: str,
     *,
-    subject: str = "py",
     max_rows: int = 60,
 ) -> str:
     """One transport's results as GitHub-flavoured Markdown."""
@@ -399,20 +423,35 @@ def render_markdown(
             out.extend(["", f"_…and {len(rows) - len(shown)} more._"])
         out.append("")
 
-    unique = matrix.unique_failures(subject)
-    unique_keys = {r.key for r in unique}
-    subject_name = next(
-        (label(matrix.columns[i]) for i in matrix.subject_columns(subject)), subject
-    )
+    # Once per implementation. The Markdown is what gets read on a phone, so
+    # it should carry the same shape as the page: four columns compared, not
+    # one prosecuted.
+    by_column = matrix.unique_failures_by_column()
+    unique_keys = {r.key for rows in by_column.values() for r in rows}
+    for index, rows in by_column.items():
+        name = label(matrix.columns[index])
+        section(
+            f"Failures unique to {name}",
+            rows,
+            f"Checks {name} fails, on every platform it ran on, that every "
+            "other implementation here passes.",
+        )
+    shared = matrix.shared_failures()
     section(
-        f"Failures unique to {subject_name}",
-        unique,
-        f"Checks {subject_name} fails, on every platform it ran on, that every "
-        "other implementation here passes.",
+        "Failures shared by every implementation",
+        shared,
+        "Four independent implementations agreeing on a failure usually means "
+        "the check asserts more than the clause requires, or the mock is "
+        "wrong. Questions about the suite before questions about the "
+        "libraries.",
     )
     section(
         "Where the implementations disagree",
-        [r for r in matrix.disagreements if r.key not in unique_keys],
+        [
+            r
+            for r in matrix.disagreements
+            if r.key not in unique_keys and r not in shared
+        ],
     )
 
     skipped = matrix.all_skipped

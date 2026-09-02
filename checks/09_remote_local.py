@@ -64,6 +64,19 @@ LOCKOUT_ONLY = {
 }
 
 
+def state_check_name(mode) -> str:
+    """The name the state check for `mode` is recorded under.
+
+    Used by the check itself and by the skip that stands in for it when the
+    throughput oracle has no signal to read, so the two cannot drift into two
+    half-blank rows.
+    """
+    note = (
+        " (local lockout itself is not observable)" if mode in LOCKOUT_ONLY else ""
+    )
+    return f"{mode.name} leaves the instrument {EXPECTED_STATE[mode]}{note}"
+
+
 def query_rate(inst, count: int) -> float:
     """Queries per second, the proxy for remote/local state."""
     start = time.time()
@@ -177,8 +190,13 @@ def main() -> int:
             )
 
             if ratio < args.ratio:
-                stats.skip(
-                    "each REN mode leaves the instrument in the state it names",
+                stats.skip_each(
+                    [state_check_name(m) for m in EXPECTED_STATE if m in supported]
+                    + [f"{m.name} is accepted" for m in NOT_OBSERVABLE if m in supported]
+                    + [
+                        "repeated remote/local round trips all succeed",
+                        "the session ends in remote",
+                    ],
                     "this instrument shows no usable throughput difference, so "
                     "the state cannot be read back from here. A native HiSLIP "
                     "instrument has no REN line and lands here",
@@ -224,14 +242,9 @@ def main() -> int:
                 set_ren(mode)
                 after = observed_state()
 
-                note = (
-                    " (local lockout itself is not observable)"
-                    if mode in LOCKOUT_ONLY
-                    else ""
-                )
                 stats.check(
                     after == expected,
-                    f"{mode.name} leaves the instrument {expected}{note}",
+                    state_check_name(mode),
                     detail=f"from {before}, saw {after}",
                 )
 

@@ -21,6 +21,17 @@ from pyvisa.constants import StatusCode  # noqa: E402
 from testgear import cli, harness, visa  # noqa: E402
 
 
+#: Everything this file checks once viTerminate is known to exist. A backend
+#: that does not implement it skips all three under these names rather than
+#: reporting one row of its own, which would leave three dashes here and one
+#: in every other column.
+TERMINATE_CHECKS = (
+    "repeated terminate/recover cycles all succeed",
+    "terminate while idle succeeds",
+    "the session is healthy after an idle terminate",
+)
+
+
 def main() -> int:
     parser = cli.build_parser(__doc__.splitlines()[0])
     parser.set_defaults(iterations=25)
@@ -49,7 +60,9 @@ def main() -> int:
                 StatusCode.error_nonimplemented_operation,
                 visa.NOT_IMPLEMENTED,
             ):
-                stats.skip("viTerminate is implemented", f"not implemented here ({st!r})")
+                stats.skip_each(
+                    TERMINATE_CHECKS, f"viTerminate is not implemented here ({st!r})"
+                )
                 stats.write_outputs(args)
                 return stats.finish()
 

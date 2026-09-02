@@ -147,10 +147,15 @@ def main() -> int:
             # over VXI-11, for a protocol neither can actually perform.
             st = visa.status(lib.assert_trigger, sess, constants.TriggerProtocol.on)
             if st == StatusCode.success:
-                stats.note(
-                    f"a non-default trigger protocol was accepted ({st!r}); "
-                    f"VPP-4.3 6.1.7 offers VI_ERROR_INV_PROT for this, and "
-                    f"this backend refuses it on the other transport"
+                # Under the check's own name, not silently. Recording only a
+                # note left the column blank where the others answered, and a
+                # blank cell reads as "not applicable" rather than "accepted,
+                # which the clause permits".
+                stats.skip(
+                    "a non-default trigger protocol is refused cleanly",
+                    f"it was accepted ({st!r}); VPP-4.3 6.1.7 offers "
+                    f"VI_ERROR_INV_PROT for this but does not require it, and "
+                    f"this backend refuses it on the other transport",
                 )
             else:
                 stats.check(
@@ -405,7 +410,9 @@ def main() -> int:
                     "without raising",
                 )
             except Exception as exc:  # noqa: BLE001
-                stats.error("SRQ events could not be enabled", exc)
+                # Under the same name the success path uses, so the row lines
+                # up with the implementations that manage it.
+                stats.error("SRQ events can be enabled and disabled", exc)
 
             visa.check_errors(inst, stats, "at end of run")
 

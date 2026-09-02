@@ -101,9 +101,15 @@ def main() -> int:
                         # here was assuming a vendor must be right -- which is
                         # exactly as unfounded as assuming pyvisa-py must be
                         # wrong.
+                        # Against the section's own name. A name of its own
+                        # left a gap in this row and a gap in the cycles row,
+                        # and neither read as a disagreement -- the same
+                        # argument clear_status() makes in 07_clear.py.
                         stats.error(
-                            "shared locks are refused on this transport",
+                            "repeated shared lock/unlock cycles all succeed",
                             rule="VPP-4.3 3.6.3, 3.6.5",
+                            detail=f"shared locks are refused on this "
+                            f"transport ({st!r})",
                         )
                         break
                     # The key comes back as bytes from some implementations

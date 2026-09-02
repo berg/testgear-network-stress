@@ -20,6 +20,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from testgear import cli, harness, visa  # noqa: E402
 
 
+#: The checks section 2 makes. Named here so the skip that stands in for them
+#: when handler delivery cannot be enabled uses the same names, and the row
+#: lines up with the implementations that got that far.
+HANDLER_CHECKS = (
+    "every service request runs the installed handler",
+    "read_stb from inside the handler works",
+    "every handler saw a real status byte",
+)
+
+
 def srq_trigger(inst) -> None:
     """Provoke one service request via the operation-complete bit.
 
@@ -193,7 +203,7 @@ def main() -> int:
                     # The enable already recorded its own FAIL. Say once that
                     # the checks depending on it are absent rather than
                     # passing, and carry on to the next section.
-                    stats.skip("the handler-delivery checks", str(exc))
+                    stats.skip_each(HANDLER_CHECKS, str(exc))
                 finally:
                     if handler_ok:
                         inst.disable_event(visa.SRQ, visa.HANDLER)

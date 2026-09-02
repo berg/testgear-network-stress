@@ -302,6 +302,27 @@ class Stats:
             )
             print(f"  SKIP {message}" + (f": {reason}" if reason else ""))
 
+    def skip_each(
+        self, names: Iterable[str], reason: str, source: str = ""
+    ) -> None:
+        """Skip several checks at once, under the names they would have had.
+
+        For a section that decides up front it cannot run -- viTerminate is
+        unimplemented, the remote/local oracle has no signal to read. The
+        temptation is to say so once, under a name of the bail-out's own
+        ("viTerminate is implemented"), and that is what produces the dashes
+        on the published page: the column that bailed gets a row nobody else
+        has, and the columns that ran get rows it does not, so one check
+        becomes two rows and both are mostly blank. A blank cell reads as "not
+        applicable"; a skip reads as "could not run, and here is why".
+
+        `clear_status` in checks/07_clear.py already argues this at length for
+        the failure case. This is the same argument for the skip case.
+        """
+        source = source or _caller()
+        for name in names:
+            self.skip(name, reason, source=source)
+
     def note(self, message: str) -> None:
         with self._lock:
             self.notes.append(message)
