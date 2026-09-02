@@ -68,8 +68,13 @@ def main() -> int:
                     break
             else:
                 elapsed = time.time() - t0
-                stats.check(True, "a storm of small queries all answer correctly")
                 rate = args.iterations / elapsed
+                stats.check(
+                    True,
+                    "a storm of small queries all answer correctly",
+                    detail=f"{args.iterations} queries in {elapsed:.2f}s "
+                    f"({rate:.0f}/s)",
+                )
                 stats.note(
                     f"{args.iterations} queries in {elapsed:.2f}s ({rate:.0f}/s)"
                 )
@@ -99,8 +104,13 @@ def main() -> int:
                         break
                 else:
                     elapsed = time.time() - t0
-                    stats.check(True, "a storm of large-response queries all answer correctly")
                     throughput = big_iterations * len(reference) / elapsed / 1024
+                    stats.check(
+                        True,
+                        "a storm of large-response queries all answer correctly",
+                        detail=f"{big_iterations} x {len(reference)}B in "
+                        f"{elapsed:.2f}s ({throughput:.0f} KiB/s)",
+                    )
                     stats.note(
                         f"{big_iterations} x {len(reference)}B in {elapsed:.2f}s "
                         f"({throughput:.0f} kB/s)"
@@ -216,10 +226,12 @@ def main() -> int:
                         collected.append(data)
                         if st == StatusCode.success:
                             break
+                    joined = b"".join(collected).decode("latin-1")
                     stats.check(
-                        b"".join(collected).decode("latin-1") == expected,
+                        joined == expected,
                         "a multi-line response reassembles across termchar reads",
                         rule="VPP-4.3 RULE 6.1.3",
+                        detail=f"got {joined!r}",
                     )
                     stats.check(
                         len(collected) > 1,
@@ -257,9 +269,11 @@ def main() -> int:
                 inst.set_visa_attribute(RA.send_end_enabled, True)
 
             # -- 6. still healthy -----------------------------------------------
+            final = inst.query("*IDN?").strip()
             stats.check(
-                inst.query("*IDN?").strip() == idn,
+                final == idn,
                 "the session still works at the end",
+                detail=f"got {final!r}",
             )
             visa.check_errors(inst, stats, "at end of run")
 

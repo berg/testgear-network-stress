@@ -112,6 +112,10 @@ def check_operations_return_status():
             f"boundary cannot be caught by anyone who had no reason to expect it"
         )
         visa.drain_errors(inst)
+        return (
+            f"{len(probes)} operations probed "
+            f"({', '.join(name for name, _ in probes)}), all returned a status"
+        )
 
 
 @check("viRead does not report VI_SUCCESS while SUPPRESS_END_EN is set",
@@ -189,6 +193,7 @@ def check_clear_flushes_buffers():
             f"after viClear the next query returned {after!r} rather than "
             f"{idn!r}; the uncollected response survived the clear"
         )
+        return f"the query after the clear returned {after!r}"
 
 
 @check("the four REN modes RULE 6.5.6 requires of TCPIP are supported",

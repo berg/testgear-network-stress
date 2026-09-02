@@ -165,6 +165,7 @@ tr.detail-row td{padding:0 .75rem .9rem;background:var(--rule-soft)}
   letter-spacing:.02em;color:var(--muted);margin-bottom:.15rem}
 .detail-head .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;
   letter-spacing:.05em;margin-right:.45rem}
+.detail-head .tag.PASS{color:var(--pass)}
 .detail-head .tag.FAIL{color:var(--fail)}
 .detail-head .tag.SKIP{color:var(--skip)}
 .detail-sum{font-size:.82rem;margin-bottom:.4rem;max-width:80ch}
@@ -441,7 +442,14 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
                     cells.append('<td class="st none">&mdash;</td>')
                     continue
                 outcome = result["outcome"]
-                text = reason(result) if outcome != "PASS" else ""
+                # Every outcome, passes included. A pass records what it saw
+                # in its detail -- the status code, the measured rate, the
+                # value that came back -- and a row where four implementations
+                # all say PASS for four different reasons is exactly the row
+                # worth opening. Withholding it until something goes wrong
+                # makes the page a grid of assertions you have to take on
+                # trust.
+                text = reason(result)
                 if text:
                     details.append((column["short"], outcome, text))
                 cells.append(f'<td class="st {outcome}">{outcome}</td>')

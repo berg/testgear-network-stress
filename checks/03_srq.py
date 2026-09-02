@@ -62,6 +62,8 @@ def main() -> int:
                 with stats.attempt(
                     "SRQ events can be enabled for queued delivery",
                     rule="VPP-4.3 3.7.6",
+                    detail="viEnableEvent(VI_EVENT_SERVICE_REQ, VI_QUEUE) "
+                    "returned without raising",
                 ) as queued_ok:
                     inst.enable_event(visa.SRQ, visa.QUEUE)
 
@@ -118,6 +120,8 @@ def main() -> int:
                 with stats.attempt(
                     "SRQ events can be enabled for handler delivery",
                     rule="VPP-4.3 3.7.6",
+                    detail="viEnableEvent(VI_EVENT_SERVICE_REQ, VI_HNDLR) "
+                    "returned without raising",
                 ) as handler_ok:
                     inst.enable_event(visa.SRQ, visa.HANDLER)
                 try:
@@ -148,6 +152,8 @@ def main() -> int:
                     stats.check(
                         all(isinstance(s, int) for s in fired),
                         "every handler saw a real status byte",
+                        detail=f"{len(fired)} callbacks, first few "
+                        f"{fired[:3]}",
                     )
                     if fired:
                         stats.note(
@@ -171,6 +177,8 @@ def main() -> int:
                 with stats.attempt(
                     "SRQ events can be re-enabled after handler delivery",
                     rule="VPP-4.3 3.7.6",
+                    detail="viEnableEvent(VI_EVENT_SERVICE_REQ, VI_QUEUE) "
+                    "returned without raising a second time",
                 ) as race_ok:
                     inst.enable_event(visa.SRQ, visa.QUEUE)
                 bad_stb: list[str] = []
@@ -235,13 +243,16 @@ def main() -> int:
                     stats.check(
                         drained > 0,
                         "the race actually produced service requests",
+                        detail=f"{drained} queued during the race{capped}",
                     )
                     inst.disable_event(visa.SRQ, visa.QUEUE)
 
                 # -- 4. after all that, the session is still sane ------------
+                final = inst.query("*IDN?").strip()
                 stats.check(
-                    inst.query("*IDN?").strip() == idn,
+                    final == idn,
                     "the session is healthy after the SRQ load",
+                    detail=f"got {final!r}",
                 )
                 visa.check_errors(inst, stats, "at end of run")
             finally:

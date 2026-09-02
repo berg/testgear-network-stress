@@ -268,7 +268,12 @@ def main() -> int:
 
             # -- 5. leave it in remote -----------------------------------------
             set_ren(constants.RENLineOperation.asrt_address)
-            stats.check(observed_state() == REMOTE, "the session ends in remote")
+            final_state = observed_state()
+            stats.check(
+                final_state == REMOTE,
+                "the session ends in remote",
+                detail=f"observed {final_state}",
+            )
             visa.check_errors(inst, stats, "at end of run")
 
         stats.write_outputs(args)

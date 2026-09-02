@@ -220,6 +220,7 @@ def check_srq_event_supported():
         assert st == StatusCode.success, (
             f"enabling VI_EVENT_SERVICE_REQ returned {st!r}"
         )
+        return f"viEnableEvent(VI_EVENT_SERVICE_REQ) returned {st!r}"
 
 
 @check("VI_ATTR_INTF_TYPE reports TCPIP", rule="VPP-4.3 5.1.11")

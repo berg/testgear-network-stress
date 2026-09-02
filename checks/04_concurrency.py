@@ -135,9 +135,11 @@ def main() -> int:
             for worker in workers:
                 worker.join(timeout=10.0)
 
+            alive = [w.name for w in workers if w.is_alive()]
             stats.check(
-                not any(w.is_alive() for w in workers),
+                not alive,
                 "all worker threads stopped cleanly",
+                detail=f"{len(workers)} workers, still running: {alive or None}",
             )
             stats.check(
                 not problems,
@@ -158,10 +160,13 @@ def main() -> int:
             stats.check(
                 counts["sync"] > 0 and counts["stb"] > 0,
                 "both channels were actually driven",
+                detail=f"{counts['sync']} queries, {counts['stb']} status queries",
             )
+            final = inst.query("*IDN?").strip()
             stats.check(
-                inst.query("*IDN?").strip() == idn,
+                final == idn,
                 "the session is healthy after the concurrent load",
+                detail=f"got {final!r}",
             )
             visa.check_errors(inst, stats, "after single-session concurrency")
 
@@ -239,12 +244,14 @@ def main() -> int:
         # as a leak check that was never written.
         completed = 0
         with stats.attempt(
-            "repeated open/close cycles all reopen the resource"
+            "repeated open/close cycles all reopen the resource",
+            detail=f"{cycles} cycles requested",
         ) as churned:
             for _ in range(cycles):
                 with open_session() as churn:
                     churn.query("*IDN?")
                 completed += 1
+                churned.detail = f"{completed}/{cycles} cycles"
         if not churned:
             stats.note(
                 f"the churn stopped after {completed}/{cycles} cycles, so the "

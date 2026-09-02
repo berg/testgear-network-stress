@@ -248,6 +248,7 @@ def check_recovery_after_mismatch():
             f"after a mismatched MessageID the next query returned {after!r}, "
             f"expected {idn!r}: the buffered response was not cleared"
         )
+        return f"the query after the discarded message returned {after!r}"
 
 
 @check("the MessageID resets to 0xFFFFFF00 after a device clear",

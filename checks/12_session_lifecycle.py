@@ -90,6 +90,7 @@ def check_queue_length_writeable():
         assert get_st == StatusCode.success and value == 42, (
             f"it did not read back as set ({get_st!r}, {value!r})"
         )
+        return f"set to 42 ({st!r}), read back {value!r} ({get_st!r})"
 
 
 @check("VI_ATTR_MAX_QUEUE_LENGTH is read-only after viEnableEvent",
@@ -145,6 +146,7 @@ def check_close_null():
     assert st == StatusCode.warning_null_object, (
         f"expected VI_WARN_NULL_OBJECT, got {st!r}"
     )
+    return f"got {st!r}"
 
 
 @check("a string attribute reads back within 256 characters",

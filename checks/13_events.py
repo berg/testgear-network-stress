@@ -225,6 +225,7 @@ def check_discard_events():
             with contextlib.suppress(Exception):
                 inst.disable_event(visa.SRQ, visa.QUEUE)
             quiet(inst)
+        return "the wait after viDiscardEvents timed out, as it should"
 
 
 @check("a handler uninstalled while enabled stops being called",

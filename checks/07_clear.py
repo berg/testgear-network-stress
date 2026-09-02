@@ -170,6 +170,8 @@ def main() -> int:
                         True,
                         "clear discards an uncollected response",
                         rule="VPP-4.3 3.2.3",
+                        detail=f"{min(args.iterations, 25)} cycles, each "
+                        f"abandoning a {probe} response",
                     )
 
             # Abandoning a query mid-flight is the point of the section above,
@@ -218,7 +220,11 @@ def main() -> int:
                         break
                 else:
                     stats.check(
-                        True, "clear resyncs mid-message", rule="VPP-4.3 3.2.3"
+                        True,
+                        "clear resyncs mid-message",
+                        rule="VPP-4.3 3.2.3",
+                        detail=f"{min(args.iterations, 25)} cycles, each "
+                        f"clearing 100B into a {len(reference)}B response",
                     )
 
                 # -- 4. the large query still works afterwards ----------------
@@ -227,7 +233,8 @@ def main() -> int:
                 # than returning the wrong thing, and an unguarded call here
                 # loses the end-of-run error check below.
                 with stats.attempt(
-                    "large reads still intact after clears"
+                    "large reads still intact after clears",
+                    detail=f"the {len(reference)}B response still matches",
                 ) as intact:
                     if inst.query(big_query) != reference:
                         raise AssertionError(

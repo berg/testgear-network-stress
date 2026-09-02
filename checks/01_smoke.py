@@ -92,7 +92,11 @@ def main() -> int:
                 rule="VPP-4.3 RULE 6.1.1",
                 detail=f"got {st!r}",
             )
-            stats.check(data.strip() == idn.encode(), "the read returned the *IDN? reply")
+            stats.check(
+                data.strip() == idn.encode(),
+                "the read returned the *IDN? reply",
+                detail=f"got {data.strip()!r}",
+            )
 
             # A short read must report max-count and leave the rest readable.
             lib.write(sess, b"*IDN?\n")
@@ -108,6 +112,7 @@ def main() -> int:
                 (data + rest).strip() == idn.encode(),
                 "the remainder of a short read is still available",
                 rule="VPP-4.3 RULE 6.1.2",
+                detail=f"got {(data + rest).strip()!r}",
             )
 
             # -- status byte ------------------------------------------------
@@ -160,12 +165,17 @@ def main() -> int:
                 )
 
             # -- clear ------------------------------------------------------
+            st = visa.status(lib.clear, sess)
             stats.check(
-                visa.status(lib.clear, sess) == StatusCode.success,
+                st == StatusCode.success,
                 "viClear reports VI_SUCCESS",
+                detail=f"got {st!r}",
             )
+            after_clear = inst.query("*IDN?").strip()
             stats.check(
-                inst.query("*IDN?").strip() == idn, "the session works after viClear"
+                after_clear == idn,
+                "the session works after viClear",
+                detail=f"got {after_clear!r}",
             )
 
             # -- locking ----------------------------------------------------
@@ -181,7 +191,11 @@ def main() -> int:
             # key regardless. Nothing depends on it being empty, so this is
             # recorded rather than failed.
             if key in ("", None, b""):
-                stats.check(True, "an exclusive lock has an empty access key")
+                stats.check(
+                    True,
+                    "an exclusive lock has an empty access key",
+                    detail=f"got {key!r}",
+                )
             else:
                 stats.note(
                     f"this implementation returns an access key for an "
@@ -199,9 +213,11 @@ def main() -> int:
                 rule="VPP-4.3 3.6.2.1",
                 detail=f"status {st!r}, value {state!r}",
             )
+            st = visa.status(lib.unlock, sess)
             stats.check(
-                visa.status(lib.unlock, sess) == StatusCode.success,
+                st == StatusCode.success,
                 "viUnlock reports VI_SUCCESS",
+                detail=f"got {st!r}",
             )
             state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
             stats.check(
@@ -244,9 +260,11 @@ def main() -> int:
             # script its last 20 checks.
             visa.status(lib.unlock, sess)
 
+            st = visa.status(lib.unlock, sess)
             stats.check(
-                visa.status(lib.unlock, sess) == StatusCode.error_session_not_locked,
+                st == StatusCode.error_session_not_locked,
                 "unlocking an unlocked session is refused",
+                detail=f"got {st!r}",
             )
 
             # -- remote/local -----------------------------------------------
@@ -380,7 +398,12 @@ def main() -> int:
             try:
                 inst.enable_event(visa.SRQ, visa.QUEUE)
                 inst.disable_event(visa.SRQ, visa.QUEUE)
-                stats.check(True, "SRQ events can be enabled and disabled")
+                stats.check(
+                    True,
+                    "SRQ events can be enabled and disabled",
+                    detail="viEnableEvent and viDisableEvent both returned "
+                    "without raising",
+                )
             except Exception as exc:  # noqa: BLE001
                 stats.error("SRQ events could not be enabled", exc)
 

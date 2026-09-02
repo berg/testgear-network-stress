@@ -178,9 +178,11 @@ def main() -> int:
             st = visa.status(lib.terminate, sess, 0, 0)
             stats.check(st == StatusCode.success, "terminate while idle succeeds",
                         detail=f"got {st!r}")
+            final = inst.query("*IDN?").strip()
             stats.check(
-                inst.query("*IDN?").strip() == idn,
+                final == idn,
                 "the session is healthy after an idle terminate",
+                detail=f"got {final!r}",
             )
             visa.check_errors(inst, stats, "at end of run")
 

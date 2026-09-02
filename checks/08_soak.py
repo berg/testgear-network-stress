@@ -233,9 +233,11 @@ def main() -> int:
                 inst.disable_event(visa.SRQ, visa.HANDLER)
                 inst.uninstall_handler(visa.SRQ, handler, wrapped)
 
+            final = inst.query("*IDN?").strip()
             stats.check(
-                inst.query("*IDN?").strip() == idn,
+                final == idn,
                 "the session is healthy at the end of the soak",
+                detail=f"got {final!r}",
             )
             visa.check_errors(inst, stats, "at end of run")
 

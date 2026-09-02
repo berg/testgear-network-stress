@@ -120,12 +120,18 @@ def check(name: str, rule: str = "", protocols: Iterable[str] = ("vxi11", "hisli
 
 
 class _Attempt:
-    """Whether the block inside `Stats.attempt` got through."""
+    """Whether the block inside `Stats.attempt` got through.
 
-    __slots__ = ("ok",)
+    `detail` is what the block observed, for the row's expando. It starts as
+    whatever the caller passed to `attempt` and the block may replace it with
+    something it only learns by running.
+    """
 
-    def __init__(self) -> None:
+    __slots__ = ("ok", "detail")
+
+    def __init__(self, detail: str = "") -> None:
         self.ok = False
+        self.detail = detail
 
     def __bool__(self) -> bool:
         return self.ok
@@ -182,12 +188,22 @@ class Stats:
                 if self.verbose:
                     print(f"  ok   {shown}")
             else:
-                cited = f"{shown} [{rule}]" if rule else shown
-                self.failures.append(cited)
+                # The terminal summary is a flat list and needs the name; the
+                # Result is filed under the name already, so repeating it in
+                # the detail just pads the page's expando with its own row
+                # header.
+                self.failures.append(f"{shown} [{rule}]" if rule else shown)
+                observed = detail or message
                 self.results.append(
-                    Result(message, FAIL, detail=cited, rule=rule, source=source)
+                    Result(
+                        message,
+                        FAIL,
+                        detail=f"{observed} [{rule}]" if rule else observed,
+                        rule=rule,
+                        source=source,
+                    )
                 )
-                print(f"  FAIL {cited}")
+                print(f"  FAIL {shown}" + (f" [{rule}]" if rule else ""))
             return bool(condition)
 
     def error(
@@ -206,22 +222,30 @@ class Stats:
         source = source or _caller()
         with self._lock:
             shown = f"{message} ({detail})" if detail else message
-            detail = f"{shown}: {type(exc).__name__}: {exc}" if exc else shown
+            observed = detail or message
+            if exc is not None:
+                shown = f"{shown}: {type(exc).__name__}: {exc}"
+                observed = f"{observed}: {type(exc).__name__}: {exc}"
             # Render the clause the same way check() does. It was being stored
             # and not shown, so a cited failure read as an uncited one in the
             # summary -- and whether a failure cites a clause is the property
             # this suite uses to decide how much to trust it.
-            cited = f"{detail} [{rule}]" if rule else detail
-            self.failures.append(cited)
+            self.failures.append(f"{shown} [{rule}]" if rule else shown)
             self.results.append(
-                Result(message, FAIL, detail=cited, rule=rule, source=source)
+                Result(
+                    message,
+                    FAIL,
+                    detail=f"{observed} [{rule}]" if rule else observed,
+                    rule=rule,
+                    source=source,
+                )
             )
-            print(f"  FAIL {cited}")
+            print(f"  FAIL {shown}" + (f" [{rule}]" if rule else ""))
             if exc is not None and self.verbose:
                 traceback.print_exc()
 
     @contextlib.contextmanager
-    def attempt(self, message: str, rule: str = ""):
+    def attempt(self, message: str, rule: str = "", detail: str = ""):
         """A call in setup whose failure is a FAIL, not a crashed script.
 
         `run_checks` already turns any exception into a FAIL, so a registered
@@ -235,7 +259,8 @@ class Stats:
         Yields a flag that is true when the block succeeded, so the caller can
         skip the part that depended on it:
 
-            with stats.attempt("SRQ events can be enabled", rule="...") as ok:
+            with stats.attempt("SRQ events can be enabled", rule="...",
+                               detail="viEnableEvent(VI_QUEUE)") as ok:
                 inst.enable_event(visa.SRQ, visa.QUEUE)
             if ok:
                 ...
@@ -246,7 +271,7 @@ class Stats:
 
         # The block the caller wrote, not the line below that records it.
         where = _caller(3)
-        outcome = _Attempt()
+        outcome = _Attempt(detail)
         try:
             yield outcome
         except Skip as exc:
@@ -256,10 +281,12 @@ class Stats:
             # backend, and must not be recorded as one. Let it out to exit 5.
             raise
         except Exception as exc:  # noqa: BLE001
-            self.error(message, exc, rule=rule, source=where)
+            self.error(message, exc, detail=outcome.detail, rule=rule, source=where)
         else:
             outcome.ok = True
-            self.check(True, message, rule=rule, source=where)
+            self.check(
+                True, message, rule=rule, detail=outcome.detail, source=where
+            )
 
     def skip(self, message: str, reason: str = "", source: str = "") -> None:
         """Record a check that did not run, and why.
@@ -269,12 +296,11 @@ class Stats:
         """
         source = source or _caller()
         with self._lock:
-            detail = f"{message}: {reason}" if reason else message
-            self.skipped.append(detail)
+            self.skipped.append(f"{message}: {reason}" if reason else message)
             self.results.append(
-                Result(message, SKIP, detail=detail, source=source)
+                Result(message, SKIP, detail=reason or message, source=source)
             )
-            print(f"  SKIP {detail}")
+            print(f"  SKIP {message}" + (f": {reason}" if reason else ""))
 
     def note(self, message: str) -> None:
         with self._lock:

@@ -105,6 +105,7 @@ def check_read_end():
         data, st = visa.call(lib.read, sess, 4096)
         assert st == StatusCode.success, f"expected VI_SUCCESS, got {st!r}"
         assert data, "no data came back"
+        return f"got {st!r} with {len(data)} bytes"
 
 
 @check("viRead reports VI_SUCCESS_TERM_CHAR when a termchar stopped it",
@@ -128,6 +129,7 @@ def check_read_termchar():
             visa.call(lib.read, sess, 4096)
         finally:
             inst.set_visa_attribute(RA.termchar_enabled, False)
+        return f"got {st!r} with {data!r}"
 
 
 @check("viRead reports VI_SUCCESS_MAX_CNT when the caller's buffer filled",
@@ -142,6 +144,7 @@ def check_read_max_count():
         )
         assert len(data) == 4, f"asked for 4 bytes, got {len(data)}"
         visa.call(lib.read, sess, 4096)
+        return f"asked for 4 bytes, got {len(data)} with {st!r}"
 
 
 @check("END wins over the byte count when the last byte fills the buffer",
@@ -166,6 +169,7 @@ def check_end_beats_count():
             f"VI_SUCCESS, got {st!r}. Callers loop while the status is "
             f"max-count, so this costs an extra read that can only time out"
         )
+        return f"a 65-byte message read into a 65-byte buffer got {st!r}"
 
 
 @check("a reply larger than maxRecvSize is reassembled intact",
@@ -179,6 +183,7 @@ def check_large_reassembly():
         assert len(reply) == size, f"expected {size} bytes, got {len(reply)}"
         expected = "".join(str(i % 10) for i in range(size))
         assert reply == expected, "the reassembled reply does not match"
+        return f"{len(reply)} bytes reassembled intact"
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +251,7 @@ def check_recovery_after_error():
         assert "," in reply, (
             f"the session did not recover from a single failed read: {reply!r}"
         )
+        return f"the query after the injected error returned {reply!r}"
 
 
 @check("a stale reply in the socket does not desynchronise the stream",
@@ -461,6 +467,7 @@ def check_lock_state():
         assert state == constants.VI_EXCLUSIVE_LOCK, (
             f"expected VI_EXCLUSIVE_LOCK, got {state!r}"
         )
+        return f"read back {state!r} ({st!r})"
 
 
 @check("the session still works after a lock attempt failed",
@@ -476,6 +483,7 @@ def check_after_failed_lock():
             a.unlock()
         reply = b.query("*IDN?").strip()
         assert "," in reply, f"session B was left unusable: {reply!r}"
+        return f"session B returned {reply!r} after its lock attempt failed"
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +521,7 @@ def check_recovery_after_timeout():
         inst.clear()
         reply = inst.query("*IDN?").strip()
         assert "," in reply, f"the session did not resynchronise: {reply!r}"
+        return f"the query after the timeout returned {reply!r}"
 
 
 @check("VI_ATTR_TCPIP_KEEPALIVE can be turned on", rule="VPP-4.3 3.5")
@@ -526,6 +535,7 @@ def check_keepalive():
         assert get_st == StatusCode.success and value is True, (
             f"keepalive did not read back as on ({get_st!r}, {value!r})"
         )
+        return f"set {st!r}, read back {value!r} ({get_st!r})"
 
 
 @check("VI_ATTR_SEND_END_EN=False suppresses END on the write",
@@ -549,10 +559,12 @@ def check_send_end_flag():
             assert not events[-1]["eoi"], (
                 "VI_ATTR_SEND_END_EN was false but the write still carried END"
             )
+            observed = f"the instrument saw eoi={events[-1]['eoi']!r}"
         finally:
             inst.set_visa_attribute(RA.send_end_enabled, True)
             lib.write(sess, b"\n")
             visa.drain_errors(inst)
+        return observed
 
 
 @check("closing the session destroys the link", rule="VXI-11 B.6.16")

@@ -94,6 +94,7 @@ def check_exclusive_nesting():
         assert second == StatusCode.success_nested_exclusive, (
             f"expected VI_SUCCESS_NESTED_EXCLUSIVE, got {second!r}"
         )
+        return f"the second exclusive lock returned {second!r}"
 
 
 @check("the unlock that leaves a lock still held reports the nesting",
@@ -119,6 +120,7 @@ def check_unlock_reports_nesting():
         assert outer == StatusCode.success, (
             f"the final unlock returned {outer!r}, expected VI_SUCCESS"
         )
+        return f"the inner unlock returned {inner!r}, the outer {outer!r}"
 
 
 @check("a nested shared lock reports VI_SUCCESS_NESTED_SHARED",
@@ -142,6 +144,7 @@ def check_shared_nesting():
         assert second == StatusCode.success_nested_shared, (
             f"expected VI_SUCCESS_NESTED_SHARED, got {second!r}"
         )
+        return f"the second shared lock returned {second!r}"
 
 
 @check("one unlock of two does not release the resource", rule="VPP-4.3 3.6.10")
@@ -180,6 +183,10 @@ def check_nesting_holds_resource():
             "locked region inside another gives the instrument up at the inner "
             "boundary while still believing it holds it"
         )
+        return (
+            f"after two locks and one unlock the contending session got "
+            f"{contend!r}"
+        )
 
 
 @check("a shared re-lock with the wrong key is refused", rule="VPP-4.3 3.6.31")
@@ -205,6 +212,7 @@ def check_shared_wrong_key():
             f"re-locking shared with a different key returned {second!r}, "
             f"expected VI_ERROR_INV_ACCESS_KEY"
         )
+        return f"re-locking with the wrong key returned {second!r}"
 
 
 @check("the unlock after the last one is refused", rule="VPP-4.3 3.6.10")
@@ -218,6 +226,7 @@ def check_unlock_underflow():
             f"unlocking an unlocked session must report "
             f"VI_ERROR_SESN_NLOCKED, got {st!r}"
         )
+        return f"the unlock after the last one returned {st!r}"
 
 
 @check("a shared lock taken twice returns the same key", rule="VPP-4.3 3.6.20")
@@ -245,6 +254,7 @@ def check_shared_key_stable():
             f"the same session locking shared twice got two different keys: "
             f"{first!r} then {second!r}"
         )
+        return f"both shared locks returned the key {as_text(first)!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +401,7 @@ def check_close_releases_locks():
             f"session still could not lock ({st!r}); the lock leaked and only "
             f"a server restart will clear it"
         )
+        return f"another session locked after the holder closed ({st!r})"
 
 
 @check("a lock dies with the connection that held it", rule="VXI-11 B.6.77",
@@ -436,6 +447,10 @@ def check_lock_dies_with_connection():
             f"the lock outlived the connection that held it ({st!r}); B.6.77 "
             f"ties locks to the core channel precisely so a controller that "
             f"vanishes does not lock an instrument permanently"
+        )
+        return (
+            f"another session locked after the holder's connection died "
+            f"({st!r})"
         )
 
 

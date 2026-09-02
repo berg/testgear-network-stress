@@ -107,6 +107,7 @@ def check_two_queries():
             f"the same query gave different answers: {first!r} then {second!r}. "
             "That is a desynchronised message stream, not a slow instrument"
         )
+        return f"both queries returned {first!r}"
 
 
 @check("a read whose message ends exactly on the chunk size terminates",
@@ -330,6 +331,7 @@ def check_recovery_after_timeout():
             f"after a timeout and a device clear the session returned {reply!r}; "
             "the message stream did not resynchronise"
         )
+        return f"the query after the timeout returned {reply!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +343,7 @@ def check_parallel_sessions():
         a = first.query("*IDN?").strip()
         b = second.query("*IDN?").strip()
         assert a == b, f"two sessions disagreed about *IDN?: {a!r} vs {b!r}"
+        return f"both sessions returned {a!r}"
 
 
 @check("a closed session does not disturb the others", rule="VPP-4.3 3.1.3")
@@ -353,6 +356,7 @@ def check_close_isolation():
             "closing one session broke another; the ResourceManager is shared "
             "per backend and closing it closes every session it owns"
         )
+        return f"the surviving session returned {reply!r}"
 
 
 @check("concurrent queries on separate sessions stay in step",
@@ -478,6 +482,7 @@ def check_observed_traffic():
         )
         reads = srv.count("read")
         assert reads == 1, f"one query should cause one read; the instrument saw {reads}"
+        return f"the instrument saw writes {writes} and {reads} read"
 
 
 def main() -> int:

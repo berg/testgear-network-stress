@@ -128,6 +128,7 @@ def check_hislip_name_selects_hislip():
             f"the device name in {CTX['resource']!r} starts with 'hislip' but "
             f"VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
         )
+        return f"VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
 
 
 @check("an 'inst' device name selects VXI-11", rule="VPP-4.3 4.3.7",
@@ -145,6 +146,7 @@ def check_inst_name_selects_vxi11():
             f"the device name in {CTX['resource']!r} starts with 'inst', which "
             f"4.3.7 makes VXI-11, but VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
         )
+        return f"VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
 
 
 @check("an omitted device name connects over VXI-11", rule="VPP-4.3 4.3.8",

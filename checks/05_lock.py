@@ -124,7 +124,9 @@ def main() -> int:
                         break
                 else:
                     stats.check(
-                        True, "repeated shared lock/unlock cycles all succeed"
+                        True,
+                        "repeated shared lock/unlock cycles all succeed",
+                        detail=f"{args.iterations} cycles",
                     )
             else:
                 stats.skip(
@@ -150,14 +152,20 @@ def main() -> int:
                 rule="VPP-4.3 3.6.2.1",
                 detail=f"status {st!r}, value {state!r}",
             )
+            st = visa.status(lib.unlock, sess)
             stats.check(
-                visa.status(lib.unlock, sess) == StatusCode.error_session_not_locked,
+                st == StatusCode.error_session_not_locked,
                 "a redundant unlock is refused",
+                detail=f"got {st!r}",
             )
 
             # -- 4. two sessions contending ---------------------------------
             _, st = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
-            stats.check(st == StatusCode.success, "session A takes an exclusive lock")
+            stats.check(
+                st == StatusCode.success,
+                "session A takes an exclusive lock",
+                detail=f"got {st!r}",
+            )
 
             t0 = time.time()
             _, st_b = visa.call(
@@ -196,15 +204,19 @@ def main() -> int:
                 )
                 stats.note(f"B waited {waited * 1000:.0f} ms before being refused")
 
+            st = visa.status(lib.unlock, sess)
             stats.check(
-                visa.status(lib.unlock, sess) == StatusCode.success,
+                st == StatusCode.success,
                 "session A unlocks",
+                detail=f"got {st!r}",
             )
             _, st_b = visa.call(
                 other_lib.lock, other_sess, constants.Lock.exclusive, 2000, None
             )
             stats.check(
-                st_b == StatusCode.success, "session B can lock once A released"
+                st_b == StatusCode.success,
+                "session B can lock once A released",
+                detail=f"got {st_b!r}",
             )
             visa.status(other_lib.unlock, other_sess)
 
@@ -213,7 +225,11 @@ def main() -> int:
                 key, st = visa.call(
                     lib.lock, sess, constants.Lock.shared, 2000, "team-key"
                 )
-                stats.check(st == StatusCode.success, "session A takes a shared lock")
+                stats.check(
+                    st == StatusCode.success,
+                    "session A takes a shared lock",
+                    detail=f"got {st!r}, key {key!r}",
+                )
                 _, st_b = visa.call(
                     other_lib.lock, other_sess, constants.Lock.shared, 2000, key
                 )
@@ -252,7 +268,8 @@ def main() -> int:
                 as "not applicable" rather than "this run died".
                 """
                 try:
-                    return bool(resource.query("*IDN?").strip()), ""
+                    reply = resource.query("*IDN?").strip()
+                    return bool(reply), f"the session answered {reply!r}"
                 except Exception as exc:  # noqa: BLE001
                     return False, f"query was refused ({visa.visa_status(exc)})"
 
