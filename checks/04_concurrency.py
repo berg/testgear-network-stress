@@ -144,7 +144,12 @@ def main() -> int:
             stats.check(
                 not problems,
                 "concurrent sessions ran without interfering",
-                detail=f"{problems[:3]}",
+                detail=f"{len(workers)} workers over {duration:.0f}s, "
+                + (
+                    f"{len(problems)} problems: {problems[:3]}"
+                    if problems
+                    else "no problems"
+                ),
             )
             stats.note(
                 f"in {duration:.0f}s: {counts['sync']} queries, {counts['stb']} "

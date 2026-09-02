@@ -111,18 +111,37 @@ def requires_pyvisa_py():
         raise Skip(f"needs pyvisa-py's internals, which are not importable ({exc})")
 
 
+#: Names pyvisa-py has used for "the link is gone". Looked up rather than
+#: imported: which of these exists depends on the tree under test, and this
+#: helper runs for every backend.
+_PYVISA_PY_CONNECTION_LOST = ("HiSLIPConnectionLost", "HiSLIPSynchronizationLost")
+
+
 def connection_gone_types() -> tuple[type[BaseException], ...]:
     """Exception types that mean the link is gone and retrying is pointless.
 
-    pyvisa-py raises its own `HiSLIPConnectionLost` alongside the standard
-    socket errors; other backends surface the same condition as a VisaIOError
-    with `error_connection_lost`, which callers check separately.
+    pyvisa-py may raise one of its own alongside the standard socket errors;
+    other backends surface the same condition as a VisaIOError with
+    `error_connection_lost`, which callers check separately.
+
+    Every name is resolved with getattr, and this is not fussiness. The
+    version of this that named `hislip.HiSLIPConnectionLost` directly guarded
+    only the *import*, so on a tree without that class the attribute lookup
+    raised AttributeError -- out of a helper called from an `except` block, in
+    a check that had already got the right answer. Upstream main has no such
+    class, and the result was one row reading FAIL in all four columns, its
+    detail a traceback through this function, on a run where NI, R&S and
+    Keysight had each correctly reported VI_ERROR_CONN_LOST. A pyvisa-py
+    internal must not be able to fail the vendor columns.
     """
     types: list[type[BaseException]] = [ConnectionError, BrokenPipeError]
     with contextlib.suppress(ImportError):
         from pyvisa_py.protocols import hislip
 
-        types.append(hislip.HiSLIPConnectionLost)
+        for name in _PYVISA_PY_CONNECTION_LOST:
+            candidate = getattr(hislip, name, None)
+            if isinstance(candidate, type) and issubclass(candidate, BaseException):
+                types.append(candidate)
     return tuple(types)
 
 

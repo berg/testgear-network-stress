@@ -122,11 +122,22 @@ def main() -> int:
                     # to re-learn the same fact, which turned a 30-second
                     # script into a twelve-minute one against NI.
                     unblocked.append(False)
-                    stats.note(
-                        f"iteration {i}: viTerminate returned success but the "
-                        f"read ran its full timeout ({outcome['elapsed']:.1f}s); "
-                        f"not repeating the remaining "
-                        f"{args.iterations - i - 1} iterations"
+                    # Recorded as a skip, not left to the `else` below. This
+                    # break skips the for/else, so the cycles check used to be
+                    # recorded neither way -- and NI and Keysight published a
+                    # blank cell for the one check this whole file exists to
+                    # make, which reads as "not applicable" rather than "not
+                    # run". The cycles genuinely did not run to completion, so
+                    # a skip carrying why is the honest answer; failing it
+                    # would make a non-violation look like one.
+                    stats.skip(
+                        "repeated terminate/recover cycles all succeed",
+                        f"viTerminate returned success but left the read to "
+                        f"run its full timeout ({outcome['elapsed']:.1f}s) on "
+                        f"iteration {i}. 3.5.1.1 recommends aborting and does "
+                        f"not require it, so this is not a failure -- but the "
+                        f"remaining {args.iterations - i - 1} iterations would "
+                        f"each cost another full timeout to re-learn it",
                     )
                     break
                 unblocked.append(True)

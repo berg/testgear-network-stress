@@ -201,7 +201,11 @@ def check_is_hislip_correct():
             f"{'HiSLIP' if expected else 'VXI-11'}, but "
             f"VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
         )
-        return f"{value!r}"
+        return (
+            f"the resource is {CTX['resource']!r}, so this is "
+            f"{'HiSLIP' if expected else 'VXI-11'}; "
+            f"VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
+        )
 
 
 @check("the service request event is supported", rule="VPP-4.3 5.1.54")
@@ -240,7 +244,7 @@ def check_interface_type():
         assert value == constants.InterfaceType.tcpip, (
             f"expected VI_INTF_TCPIP, got {value!r}"
         )
-        return f"{value!r}"
+        return f"VI_ATTR_INTF_TYPE reads {value!r}"
 
 
 def main() -> int:

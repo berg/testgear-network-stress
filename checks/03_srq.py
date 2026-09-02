@@ -85,6 +85,16 @@ def main() -> int:
                         rule="VPP-4.3 3.4.1",
                         detail=f"{received}/{args.iterations} arrived",
                     )
+                else:
+                    # The delivery check cannot run, and saying so is not
+                    # optional: leaving it unrecorded published a blank cell
+                    # for the column that most needed one, and a blank cell
+                    # reads as "not applicable" rather than "could not run".
+                    stats.skip(
+                        "every queued service request is delivered",
+                        "queued delivery could not be enabled, so no service "
+                        "request could be waited for",
+                    )
                 if args.protocol == "vxi11":
                     # Not a failure, but the reason this section is slow, and
                     # worth saying out loud so nobody spends an afternoon on
@@ -147,13 +157,32 @@ def main() -> int:
                     stats.check(
                         not handler_errors,
                         "read_stb from inside the handler works",
-                        detail=f"{handler_errors[:3]}",
+                        detail=f"{len(fired)} calls from inside the handler, "
+                        + (
+                            f"{len(handler_errors)} raised: {handler_errors[:3]}"
+                            if handler_errors
+                            else "none raised"
+                        ),
                     )
+                    # `all(isinstance(s, int) ...)` was the whole assertion
+                    # here, which is true of any int and true of an empty
+                    # list -- so the check passed on a run where no handler
+                    # ran at all, and passed on R&S with a 0x00 among the
+                    # bytes. A status byte is one byte: that is the claim.
+                    #
+                    # RQS (bit 6) is reported, not asserted. It is what marks
+                    # the byte as the one that requested service, but the
+                    # poller threads in section 3 read the status byte too and
+                    # reading it clears RQS, so a handler can legitimately
+                    # arrive to find it already taken.
+                    with_rqs = sum(1 for s in fired if isinstance(s, int) and s & 0x40)
                     stats.check(
-                        all(isinstance(s, int) for s in fired),
+                        bool(fired)
+                        and all(isinstance(s, int) and 0 <= s <= 0xFF for s in fired),
                         "every handler saw a real status byte",
-                        detail=f"{len(fired)} callbacks, first few "
-                        f"{fired[:3]}",
+                        rule="VPP-4.3 3.4.1",
+                        detail=f"{len(fired)} callbacks, {with_rqs} with RQS "
+                        f"set, first few {fired[:3]}",
                     )
                     if fired:
                         stats.note(
@@ -216,7 +245,13 @@ def main() -> int:
                     not bad_stb,
                     "status queries stayed intact while SRQs fired",
                     rule="VPP-4.3 3.3.1",
-                    detail=f"{bad_stb[:3]}",
+                    detail=f"3 pollers against {args.iterations} service "
+                    f"requests, "
+                    + (
+                        f"{len(bad_stb)} bad reads: {bad_stb[:3]}"
+                        if bad_stb
+                        else "no bad reads"
+                    ),
                 )
                 # Bounded by wall clock as well as by count. The race can
                 # queue thousands of events, and draining them one at a time
@@ -246,6 +281,12 @@ def main() -> int:
                         detail=f"{drained} queued during the race{capped}",
                     )
                     inst.disable_event(visa.SRQ, visa.QUEUE)
+                else:
+                    stats.skip(
+                        "the race actually produced service requests",
+                        "the queue could not be re-enabled after handler "
+                        "delivery, so there was nothing to drain",
+                    )
 
                 # -- 4. after all that, the session is still sane ------------
                 final = inst.query("*IDN?").strip()
