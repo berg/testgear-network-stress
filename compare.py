@@ -133,6 +133,14 @@ def main() -> int:
         "null code; see testgear.harness.main for what each code means",
     )
     parser.add_argument(
+        "--iterations",
+        type=int,
+        default=300,
+        help="iteration count for the scripts that take one (default: 300, "
+        "the same sweep run_all.py does)",
+    )
+    parser.add_argument("--soak", type=int, default=60)
+    parser.add_argument(
         "--timeout", type=float, default=600.0, help="per-script timeout in seconds"
     )
     # The repo venv when there is one, otherwise whatever is running this --
@@ -147,11 +155,19 @@ def main() -> int:
     )
     args, extra = parser.parse_known_args()
 
-    scripts = (
-        args.scripts.split(",")
-        if args.scripts
-        else suite.names(args.protocol, matrix_only=True)
-    )
+    # Script objects, not names: each one carries the arguments it is meant to
+    # run with, and passing only the name silently reverts to the parser's
+    # defaults. 03_srq is the expensive case -- the suite says -n 30, the
+    # default is 200, and VXI-11 service requests arrive about one a second
+    # because pyvisa-py does not acknowledge device_intr_srq (see
+    # docs/findings.md), so the difference is minutes per run per backend.
+    if args.scripts:
+        wanted = args.scripts.split(",")
+        scripts = [
+            suite.BY_NAME.get(name) or suite.Script(name) for name in wanted
+        ]
+    else:
+        scripts = list(suite.for_protocol(args.protocol, matrix_only=True))
 
     # Two comparison modes. Several trees of one backend answers "did my branch
     # change anything?"; several backends answers "is pyvisa-py the odd one
@@ -219,11 +235,22 @@ def main() -> int:
         print(f"\n=== {label} ({args.protocol})")
         reports = []
         for script in scripts:
-            print(f"  {script}")
+            print(f"  {script.name}")
+            # The suite's arguments first, then the caller's passthrough, so an
+            # explicit -n on the command line still wins.
+            script_args = script.argv(
+                iterations=args.iterations, soak=args.soak
+            ) + extra
             rep, rc = run_one(
-                args.python, script, args.protocol, backend, tree, extra, args.timeout
+                args.python,
+                script.name,
+                args.protocol,
+                backend,
+                tree,
+                script_args,
+                args.timeout,
             )
-            exit_codes.setdefault(label, {})[script] = rc
+            exit_codes.setdefault(label, {})[script.name] = rc
             if rep is not None:
                 reports.append(rep)
         if reports:
