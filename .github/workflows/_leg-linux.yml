@@ -44,6 +44,15 @@ on:
         description: The environment gating the vendor credentials
         type: string
         default: ""
+    secrets:
+      # Not secret in the sense of confidential -- an ARN and a bucket name --
+      # but both embed the AWS account id, and `with:` inputs and `run:` blocks
+      # are printed verbatim in the log. On a public repository that publishes
+      # the account id for no reason. As secrets they are masked.
+      AWS_ROLE_ARN:
+        required: false
+      VENDOR_BUCKET:
+        required: false
 
 permissions:
   contents: read
@@ -56,6 +65,11 @@ jobs:
     # environment is what a fork PR cannot reach, so it is the gate -- an `if:`
     # on a branch name would be enforced only by YAML a PR could edit.
     environment: ${{ inputs.environment }}
+    # Lifted to job level because the `secrets` context is not available in a
+    # step's `if:` and `env` is. The values are masked either way.
+    env:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      VENDOR_BUCKET: ${{ secrets.VENDOR_BUCKET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -85,22 +99,22 @@ jobs:
       # not fail the weekly run with an assume-role error that looks like a
       # permissions problem.
       - name: Assume the vendor-read role
-        if: fromJSON(inputs.leg).vendor && vars.AWS_ROLE_ARN != ''
+        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
           role-duration-seconds: 900
           mask-aws-account-id: true
 
       - name: Fetch the installer
-        if: fromJSON(inputs.leg).vendor && vars.AWS_ROLE_ARN != ''
+        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN != ''
         run: |
           set +e
           python tools/fetch_vendor.py \
             --backend "${{ fromJSON(inputs.leg).backend }}" \
             --os linux \
-            --bucket "${{ vars.VENDOR_BUCKET }}" \
+            --bucket "$VENDOR_BUCKET" \
             --into vendor/
           rc=$?
           # 3 is "nobody has provisioned this one yet". That belongs on the
@@ -129,7 +143,7 @@ jobs:
       # cache is readable by fork-PR workflows, and these installers are not
       # redistributable.
       - name: Note that no vendor store is configured
-        if: fromJSON(inputs.leg).vendor && vars.AWS_ROLE_ARN == ''
+        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN == ''
         run: |
           echo "::warning::no AWS_ROLE_ARN on this environment, so there is no"\
                " installer to fetch. The image will build without one and the"\

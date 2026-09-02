@@ -251,15 +251,24 @@ configuration reads. Uploading a driver is a human with their own credentials.
 
 ## 5. What to hand back
 
-Three values, which go into the GitHub Environment named `vendor-drivers` as
-**variables** (not secrets — none of them is one, and OIDC is the actual
-control):
+Three values:
 
-| Variable | Value |
-| --- | --- |
-| `AWS_ROLE_ARN` | the role ARN |
-| `AWS_REGION` | the bucket's region |
-| `VENDOR_BUCKET` | the bucket name |
+| Name | Kind | Value |
+| --- | --- | --- |
+| `AWS_ROLE_ARN` | secret | the role ARN |
+| `VENDOR_BUCKET` | secret | the bucket name |
+| `AWS_REGION` | variable | the bucket's region |
+
+The first two are secrets for one narrow reason, and it is not confidentiality:
+they embed the AWS account id, and GitHub prints `with:` inputs and `run:`
+blocks verbatim in the log. On a public repository that publishes the account
+id to no purpose. As secrets they are masked. The region is not sensitive and
+stays a plain variable.
+
+A wrinkle worth knowing if you touch the workflows: the `secrets` context is
+not available in a step's `if:`, so `_leg-linux.yml` lifts both to job-level
+`env` and gates on `env.AWS_ROLE_ARN != ''`. That is also what makes an
+unprovisioned store report an unavailable column instead of failing the run.
 
 ---
 

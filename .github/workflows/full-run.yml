@@ -45,6 +45,7 @@ jobs:
       matrix:
         leg: ${{ fromJSON(needs.plan.outputs.linux-legs) }}
     uses: ./.github/workflows/_leg-linux.yml
+    secrets: inherit
     with:
       leg: ${{ toJSON(matrix.leg) }}
       pyvisa-py-repo: pyvisa/pyvisa-py

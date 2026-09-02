@@ -54,6 +54,11 @@ is about the workflow rather than the event, and it is enforced structurally:
 - The role's OIDC trust policy requires
   `repo:OWNER/REPO:environment:vendor-drivers` as an exact string, so that
   branch rule is enforced by AWS as well as by GitHub.
+- `AWS_ROLE_ARN` and `VENDOR_BUCKET` are repository **secrets**, so they are
+  masked in logs. Not because they are confidential — they are an ARN and a
+  bucket name — but because both embed the account id and GitHub prints `with:`
+  inputs and `run:` blocks verbatim, which on a public repository would publish
+  it for nothing. `AWS_REGION` is a plain variable.
 - AWS credentials are cleared from the environment immediately after the
   installer is fetched, before anything third-party runs.
 
