@@ -88,7 +88,8 @@ jobs:
             exit 1
           fi
           python tools/artifact_matrix.py \
-            --full-page --out site/index.html --reports "${reports[@]}"
+            --full-page --out site/index.html --reports "${reports[@]}" \
+            --source-url "${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}"
 
       - name: Render the Markdown
         run: |

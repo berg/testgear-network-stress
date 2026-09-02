@@ -131,6 +131,10 @@ tr.differs td:first-child{box-shadow:inset 3px 0 0 var(--stripe)}
    implementation of the same spec" is a much stronger claim than "disagrees
    with the others somehow". */
 tr.pyonly td:first-child{box-shadow:inset 5px 0 0 var(--fail)}
+/* The check name links to the line that asserts it. Underlined only on hover:
+   every row would otherwise be a wall of blue. */
+a.src{color:inherit;text-decoration:none}
+a.src:hover{text-decoration:underline;text-decoration-style:dotted}
 tr.allskip{background:var(--skip-wash)}
 .check{max-width:34rem}
 .rule{font-family:var(--mono);font-size:.68rem;color:var(--muted);display:block;
@@ -268,7 +272,7 @@ def load(root: Path) -> list[dict]:
     return cols
 
 
-def render_protocol(protocol: str, cols, out, prose: dict) -> None:
+def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "") -> None:
     w = out.append
     matrix = aggregate.build(cols)
     titles = prose.get("protocol_titles", {})
@@ -278,6 +282,10 @@ def render_protocol(protocol: str, cols, out, prose: dict) -> None:
     unique = matrix.unique_failures()
     unique_keys = {r.key for r in unique}
     dead = [c for c in cols if aggregate.status(c) != "ok"]
+    # Only worth showing when it separates two columns. Every leg is Linux
+    # today, and stamping LINUX on all four of them is noise that reads as
+    # information.
+    show_os = len({c.get("os_label", "") for c in cols if c.get("os_label")}) > 1
 
     ctx = next(
         (c.get("context") for c in cols if aggregate.status(c) == "ok"), {}
@@ -349,7 +357,7 @@ def render_protocol(protocol: str, cols, out, prose: dict) -> None:
         why = column.get("reason", "")
         sub = version if st == "ok" else f"{st} \u2014 {why}"
         w(f'<div class="ver">{esc(sub)}</div>')
-        if column.get("os_label"):
+        if show_os and column.get("os_label"):
             w(f'<div class="ver os">{esc(column["os_label"])}</div>')
         if column.get("errors"):
             w(f'<div class="ver crashed">{len(column["errors"])} script(s) '
@@ -410,14 +418,26 @@ def render_protocol(protocol: str, cols, out, prose: dict) -> None:
             rule_html = (
                 f'<span class="rule">{esc(row.rule)}</span>' if row.rule else ""
             )
-            name = row.name.partition(": ")[2] or row.name
+            # The masked key, not the name. A name carries the measurement of
+            # whichever column happened to be first, which is pyvisa-py -- so
+            # the row header was quoting one implementation at the others.
+            name = esc(row.label)
+            if source_url and row.source:
+                path, _, line = row.source.partition(":")
+                href = f"{source_url.rstrip('/')}/{path}"
+                if line:
+                    href += f"#L{line}"
+                name = (
+                    f'<a class="src" href="{esc(href)}" '
+                    f'title="{esc(row.source)}">{name}</a>'
+                )
 
             if details:
                 marker = '<span class="caret" aria-hidden="true">&#9656;</span>'
                 w(f'<tr class="{" ".join(classes)}" data-row="{uid}" '
                   f'tabindex="0" role="button" aria-expanded="false" '
                   f'aria-controls="d-{uid}">'
-                  f'<td class="check">{marker}{esc(name)}{rule_html}</td>'
+                  f'<td class="check">{marker}{name}{rule_html}</td>'
                   f'{"".join(cells)}</tr>')
                 panel = []
                 for who, outcome, text in details:
@@ -435,7 +455,7 @@ def render_protocol(protocol: str, cols, out, prose: dict) -> None:
             else:
                 w(f'<tr class="{" ".join(classes)}">'
                   f'<td class="check"><span class="caret spacer"></span>'
-                  f'{esc(name)}{rule_html}</td>{"".join(cells)}</tr>')
+                  f'{name}{rule_html}</td>{"".join(cells)}</tr>')
     w("</tbody></table></div>")
     w("</section>")
 
@@ -463,6 +483,14 @@ def main() -> int:
         "--prose",
         default=str(HERE / "docs" / "matrix.json"),
         help="JSON holding the page's title, lede and findings",
+    )
+    parser.add_argument(
+        "--source-url",
+        default="",
+        metavar="PREFIX",
+        help="link each check to its source, e.g. "
+        "https://github.com/OWNER/REPO/blob/SHA . A row then reads back to the "
+        "assertion that produced it instead of being grepped for",
     )
     parser.add_argument(
         "--full-page",
@@ -527,7 +555,7 @@ def main() -> int:
     w("</header>")
 
     for protocol, cols in sections:
-        render_protocol(protocol, cols, out, prose)
+        render_protocol(protocol, cols, out, prose, args.source_url)
 
     w('<section class="findings">')
     w("<h4>Confirmed findings</h4>")

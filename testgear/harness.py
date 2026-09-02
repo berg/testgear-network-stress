@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
+import pathlib
 import re
 import sys
 import threading
@@ -30,6 +31,10 @@ import traceback
 from typing import Callable, Iterable
 
 PASS = "PASS"
+#: The repository root, so a recorded source location is `checks/x.py:12`
+#: rather than an absolute path that means nothing on another machine.
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 FAIL = "FAIL"
 SKIP = "SKIP"
 
@@ -73,6 +78,22 @@ def stable_key(name: str) -> str:
     return _VARIABLE.sub("*", name).strip()
 
 
+def _caller(depth: int = 2) -> str:
+    """`checks/03_srq.py:57` for the frame `depth` levels up, or "".
+
+    Recorded so a failing row on the published page can link to the check that
+    produced it. A reader who wants to know what a check actually asserts has,
+    until now, had to grep for its wording.
+    """
+    frame = sys._getframe(depth)
+    path = pathlib.Path(frame.f_code.co_filename)
+    try:
+        path = path.relative_to(_ROOT)
+    except ValueError:
+        path = pathlib.Path(path.name)
+    return f"{path.as_posix()}:{frame.f_lineno}"
+
+
 @dataclasses.dataclass
 class Result:
     name: str
@@ -82,6 +103,11 @@ class Result:
     #: The spec clause this check rests on, when it has one. A failure that
     #: cites a rule is a bug report; one that does not is an opinion.
     rule: str = ""
+
+    #: Where the check lives, as `checks/03_srq.py:57`. The published page
+    #: turns it into a link, so a row can be read back to the assertion that
+    #: produced it instead of grepped for.
+    source: str = ""
 
     def as_dict(self) -> dict:
         data = dataclasses.asdict(self)
@@ -149,21 +175,27 @@ class Stats:
         fails appears as a *missing* result rather than a failing one. Put the
         observed value in `detail`, which is reported either way.
         """
+        source = _caller()
         with self._lock:
             shown = f"{message} ({detail})" if detail else message
             if condition:
                 self.ok += 1
-                self.results.append(Result(message, PASS, detail=detail, rule=rule))
+                self.results.append(
+                    Result(message, PASS, detail=detail, rule=rule, source=source)
+                )
                 if self.verbose:
                     print(f"  ok   {shown}")
             else:
                 cited = f"{shown} [{rule}]" if rule else shown
                 self.failures.append(cited)
-                self.results.append(Result(message, FAIL, detail=cited, rule=rule))
+                self.results.append(
+                    Result(message, FAIL, detail=cited, rule=rule, source=source)
+                )
                 print(f"  FAIL {cited}")
             return bool(condition)
 
     def error(self, message: str, exc: BaseException | None = None, rule: str = "") -> None:
+        source = _caller()
         with self._lock:
             detail = f"{message}: {type(exc).__name__}: {exc}" if exc else message
             # Render the clause the same way check() does. It was being stored
@@ -172,7 +204,9 @@ class Stats:
             # this suite uses to decide how much to trust it.
             cited = f"{detail} [{rule}]" if rule else detail
             self.failures.append(cited)
-            self.results.append(Result(message, FAIL, detail=cited, rule=rule))
+            self.results.append(
+                Result(message, FAIL, detail=cited, rule=rule, source=source)
+            )
             print(f"  FAIL {cited}")
             if exc is not None and self.verbose:
                 traceback.print_exc()
@@ -222,10 +256,13 @@ class Stats:
         The reason is what the report shows in place of a result, so a skip
         reads as an explained absence rather than as a silent pass.
         """
+        source = _caller()
         with self._lock:
             detail = f"{message}: {reason}" if reason else message
             self.skipped.append(detail)
-            self.results.append(Result(message, SKIP, detail=detail))
+            self.results.append(
+                Result(message, SKIP, detail=detail, source=source)
+            )
             print(f"  SKIP {detail}")
 
     def note(self, message: str) -> None:
@@ -331,6 +368,17 @@ def run_checks(
     for func in checks:
         name = getattr(func, "_check_name", func.__name__)
         rule = getattr(func, "_check_rule", "")
+        # The function itself, not this frame: a registered check's home is
+        # where it is written, and collect() already sorts on the same number.
+        code = getattr(func, "__code__", None)
+        source = ""
+        if code is not None:
+            path = pathlib.Path(code.co_filename)
+            try:
+                path = path.relative_to(_ROOT)
+            except ValueError:
+                path = pathlib.Path(path.name)
+            source = f"{path.as_posix()}:{code.co_firstlineno}"
         started = time.time()
         try:
             if watchdog:
@@ -340,27 +388,35 @@ def run_checks(
             elapsed = time.time() - started
             with stats._lock:
                 stats.ok += 1
-                stats.results.append(Result(name, PASS, detail, elapsed, rule))
+                stats.results.append(
+                    Result(name, PASS, detail, elapsed, rule, source)
+                )
             print(f"PASS  {name}" + (f"\n      {detail}" if detail else ""))
         except Skip as exc:
             elapsed = time.time() - started
             with stats._lock:
                 stats.skipped.append(f"{name}: {exc}")
-                stats.results.append(Result(name, SKIP, str(exc), elapsed, rule))
+                stats.results.append(
+                    Result(name, SKIP, str(exc), elapsed, rule, source)
+                )
             print(f"SKIP  {name}\n      {exc}")
         except AssertionError as exc:
             elapsed = time.time() - started
             cited = f"{exc} [{rule}]" if rule else str(exc)
             with stats._lock:
                 stats.failures.append(f"{name}: {cited}")
-                stats.results.append(Result(name, FAIL, cited, elapsed, rule))
+                stats.results.append(
+                    Result(name, FAIL, cited, elapsed, rule, source)
+                )
             print(f"FAIL  {name}\n      {cited}")
         except TimeoutError as exc:
             elapsed = time.time() - started
             cited = f"{exc} [{rule}]" if rule else str(exc)
             with stats._lock:
                 stats.failures.append(f"{name}: {cited}")
-                stats.results.append(Result(name, FAIL, cited, elapsed, rule))
+                stats.results.append(
+                    Result(name, FAIL, cited, elapsed, rule, source)
+                )
             print(f"FAIL  {name}\n      {cited}")
             # The abandoned thread is still running, and it is still talking to
             # the target -- a wedged client typically loops. Left alone it goes
@@ -380,7 +436,9 @@ def run_checks(
             trace = traceback.format_exc()
             with stats._lock:
                 stats.failures.append(f"{name}: unexpected exception")
-                stats.results.append(Result(name, FAIL, trace, elapsed, rule))
+                stats.results.append(
+                    Result(name, FAIL, trace, elapsed, rule, source)
+                )
             print(f"FAIL  {name} (unexpected exception)")
             print("      " + trace.replace("\n", "\n      ").rstrip())
     return stats

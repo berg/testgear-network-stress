@@ -110,6 +110,33 @@ class Row:
     cells: list[dict | None]
     #: Which columns were compared to reach `differs` -- the `ok` ones.
     compared: list[int]
+    #: Where the check is written, as `checks/03_srq.py:57`, from whichever
+    #: column recorded one. The same check lives at the same line whoever ran
+    #: it, so the first answer is as good as any.
+    source: str = ""
+
+    @property
+    def label(self) -> str:
+        """What to call this row in a matrix.
+
+        Not `name`. Check names carry their evidence -- "a read of a complete
+        message returns VI_SUCCESS, got <StatusCode.success: 0>" -- and the
+        union takes each row's name from the first column that has it, which is
+        pyvisa-py. So the row header was showing one implementation's
+        measurement as though it were the check's identity, next to columns
+        that may have answered something else entirely.
+
+        The masked key is the check's identity, which is why it is what the
+        columns are joined on. Show that, and let the per-column detail carry
+        what each one actually returned.
+
+        The `*` that stable_key leaves behind is shown as it is. Prettifying it
+        into an ellipsis looked better until `*IDN?` came out as `…IDN?` -- the
+        mask and a SCPI command star are the same character, and nothing in the
+        string says which is which.
+        """
+        _, _, rest = self.key.partition(": ")
+        return rest or self.key
 
     @property
     def outcomes(self) -> list[str]:
@@ -230,12 +257,14 @@ def build(columns: list[dict]) -> Matrix:
             script, _, rest = name.partition(": ")
             cells = [lk.get(key) for lk in lookups]
             rule = next((c["rule"] for c in cells if c and c.get("rule")), "")
+            source = next((c["source"] for c in cells if c and c.get("source")), "")
             rows.append(
                 Row(
                     key=key,
                     name=name,
                     rule=rule,
                     script=script if rest else "",
+                    source=source,
                     cells=cells,
                     compared=compared,
                 )
@@ -270,7 +299,7 @@ def _md_table(header: list[str], rows: list[list[str]]) -> list[str]:
 
 def _outcome_rows(matrix: Matrix, rows: list[Row]) -> list[list[str]]:
     return [
-        [_md_escape(r.name)]
+        [_md_escape(r.label)]
         + [_CELL.get(o, o) for o in (r.outcomes[i] for i in matrix.compared)]
         + [_md_escape(r.rule) or ""]
         for r in rows
@@ -289,6 +318,8 @@ def render_markdown(
 
     # -- what each column did, including the ones that did nothing ----------
     shown = display_labels(matrix.columns)
+    # The OS column earns its place only when the columns differ about it.
+    show_os = len({c.get("os_label", "") for c in matrix.columns if c.get("os_label")}) > 1
     counts = []
     for i, column in enumerate(matrix.columns):
         st = status(column)
@@ -311,13 +342,14 @@ def render_markdown(
             )
         else:
             note = "ok"
-        counts.append(
-            [_md_escape(label(column)), column.get("os_label", ""), *cells,
-             _md_escape(note)]
-        )
-    out += _md_table(
-        ["Column", "OS", "Pass", "Fail", "Skip", "Status"], counts
-    ) + [""]
+        row = [_md_escape(label(column))]
+        if show_os:
+            row.append(column.get("os_label", ""))
+        counts.append(row + cells + [_md_escape(note)])
+    header = ["Column"] + (["OS"] if show_os else []) + [
+        "Pass", "Fail", "Skip", "Status"
+    ]
+    out += _md_table(header, counts) + [""]
 
     missing = [c for c in matrix.columns if status(c) != "ok"]
     if missing:
