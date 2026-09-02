@@ -52,6 +52,11 @@ jobs:
       matrix:
         leg: ${{ fromJSON(needs.plan.outputs.linux-legs) }}
     uses: ./.github/workflows/_leg-linux.yml
+    # No id-token here, on purpose: this is the workflow that clones and runs a
+    # caller-named tree, and it has no business holding a token it could
+    # exchange for anything.
+    permissions:
+      contents: read
     secrets: inherit
     with:
       leg: ${{ toJSON(matrix.leg) }}

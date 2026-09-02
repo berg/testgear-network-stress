@@ -45,6 +45,10 @@ jobs:
       matrix:
         leg: ${{ fromJSON(needs.plan.outputs.linux-legs) }}
     uses: ./.github/workflows/_leg-linux.yml
+    permissions:
+      contents: read
+      # For the OIDC token the vendor legs exchange for the S3 read role.
+      id-token: write
     secrets: inherit
     with:
       leg: ${{ toJSON(matrix.leg) }}
@@ -78,4 +82,9 @@ jobs:
   publish:
     needs: [aggregate]
     if: always() && needs.aggregate.result != 'skipped'
+    permissions:
+      contents: read
+      # Pages' own deploy token, unrelated to the AWS one above.
+      pages: write
+      id-token: write
     uses: ./.github/workflows/_publish.yml

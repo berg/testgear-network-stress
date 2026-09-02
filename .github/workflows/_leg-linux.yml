@@ -54,8 +54,11 @@ on:
       VENDOR_BUCKET:
         required: false
 
-permissions:
-  contents: read
+# Deliberately no `permissions:` here. A reusable workflow may not request more
+# than its caller granted -- doing so fails the whole run before any job starts
+# -- and this one is called from two places that need different things: the
+# full run's vendor legs need id-token for OIDC, the pyvisa-py run must not
+# have it. So each caller grants, and this inherits.
 
 jobs:
   leg:

@@ -8,16 +8,14 @@ name: publish
 on:
   workflow_call:
 
-permissions:
-  contents: read
+# No `permissions:` -- see the note in _leg-linux.yml. The caller grants
+# pages: write and id-token: write; requesting them here as well is what made
+# the first full run fail at startup, before a single job began.
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      pages: write
-      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
