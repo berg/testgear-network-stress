@@ -154,9 +154,18 @@ RUN set -eux; \
     cp "$run" /tmp/iols.run; \
     chmod +x /tmp/iols.run; \
     timeout 120 /tmp/iols.run --version </dev/null || true; \
-    # Only what a TCPIP run needs. The GPIB and PXI components want kernel
-    # modules a container cannot load -- the same wall NI hits -- and the GUIs
-    # want a display.
+    # --disable-components, not --enable-components. They are not symmetric:
+    # naming only iio,iom,lan under --enable still ran the kernel-driver step,
+    # while disabling the hardware components explicitly skips it entirely.
+    # That step is 69 of the install's 159 seconds and all of it is wasted --
+    # it apt-installs a whole C toolchain so dkms can build modules that then
+    # fail to insert ("Operation not permitted"), which is the same wall NI
+    # hits and which nothing here needs, since every resource is TCPIP.
+    #
+    # The list is only what wants a kernel module or a display. It stops there
+    # on purpose: also disabling remotes, asrl and vxi builds faster still and
+    # leaves no discovery service, so TCPIP0 never resolves and the column is
+    # a library that cannot open anything.
     #
     # </dev/null and a timeout on every invocation, because this is a `docker
     # build`: there is no TTY, and anything that decides to read stdin blocks
@@ -169,7 +178,7 @@ RUN set -eux; \
     # and PXI kernel drivers, so if the trimmed install is what hung, retrying
     # with more of it is the wrong instinct.
     timeout 1800 /tmp/iols.run --mode unattended --unattendedmodeui none \
-        --enable-components iio,iom,lan,interfaces </dev/null \
+        --disable-components guis,usbtmc,pcigpib,usbgpib,vxigpib,pxi </dev/null \
         || echo "IOLS install failed or timed out; the run will report the backend missing"; \
     # The installer prints nothing at all while it works -- 174s of silence on
     # an idle 8-core box, longer on a runner -- so silence is not evidence of a
