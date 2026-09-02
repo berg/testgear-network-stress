@@ -197,50 +197,30 @@ def render_matrix(runs: list[dict], title: str = "Backend comparison") -> str:
     -- a comparison with a column silently missing reads like agreement between
     whatever is left.
     """
-    columns = [r.get("label", r.get("context", {}).get("backend", "?")) for r in runs]
+    from . import aggregate
 
-    # Union of check names, keeping the order of the first run that has each,
-    # so the table reads in the order the checks were written.
-    order: list[str] = []
-    display: dict[str, str] = {}
-    seen = set()
-    for run in runs:
-        for result in run.get("results", []):
-            key = result.get("key", result["name"])
-            if key not in seen:
-                seen.add(key)
-                order.append(key)
-                display[key] = result["name"]
-
-    by_run = [
-        {result.get("key", result["name"]): result for result in run.get("results", [])}
-        for run in runs
-    ]
+    matrix = aggregate.build(runs)
+    columns = [aggregate.label(r) for r in runs]
 
     rows = []
-    differing = 0
-    for key in order:
-        name = display[key]
+    for row in matrix.rows:
         cells = []
-        outcomes = set()
-        rule = ""
-        for lookup in by_run:
-            result = lookup.get(key)
+        for result in row.cells:
             if result is None:
                 cells.append('<td class="cell none">&mdash;</td>')
-                outcomes.add(None)
                 continue
-            rule = rule or result.get("rule", "")
-            outcomes.add(result["outcome"])
             cells.append(f'<td class="cell {result["outcome"]}">{result["outcome"]}</td>')
-
-        differs = len(outcomes) > 1
-        differing += differs
-        rule_html = f'<span class="rule">{_esc(rule)}</span>' if rule else ""
+        rule_html = f'<span class="rule">{_esc(row.rule)}</span>' if row.rule else ""
         rows.append(
-            f'<tr class="{"differs" if differs else ""}">'
-            f"<td>{_esc(name)}{rule_html}</td>{''.join(cells)}</tr>"
+            f'<tr class="{"differs" if row.differs else ""}">'
+            f"<td>{_esc(row.name)}{rule_html}</td>{''.join(cells)}</tr>"
         )
+
+    order = matrix.rows
+    differing = len(matrix.disagreements)
+    by_run = [
+        {r.get("key", r["name"]): r for r in run.get("results", [])} for run in runs
+    ]
 
     header = "".join(f"<th>{_esc(c)}</th>" for c in columns)
     env_blocks = "".join(
@@ -254,11 +234,7 @@ def render_matrix(runs: list[dict], title: str = "Backend comparison") -> str:
         f"{'backend' if len(runs) == 1 else 'backends'}. "
         f"{differing} disagree.</p>"
         + _tally(
-            sum(
-                1
-                for k in order
-                if all(l.get(k, {}).get("outcome") == PASS for l in by_run)
-            ),
+            sum(1 for r in order if set(r.compared_outcomes) == {PASS}),
             differing,
             0,
             extra=f"{len(order)} checks",

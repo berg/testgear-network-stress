@@ -39,6 +39,38 @@ well travelled, and the container base is ours to choose.
 
 R&S also ship a `.tar.gz`; the `.deb` is the one this expects.
 
+## `keysight/` — Keysight IO Libraries Suite
+
+**Linux, 64-bit.** <https://www.keysight.com/find/iosuite>. The licence is
+free, perpetual and needs no activation. Put whatever they give you --
+tarball, `.deb`s, or a `.run` -- in `keysight/`.
+
+The Linux build is not linked from the main downloads page, which lists Windows
+only; it exists and is worth chasing. It is the reason this suite has no
+Windows CI leg at all. On Linux, Keysight installs into the same container as
+NI and R&S, so all four implementations run on one kernel against one mock --
+and every finding in `docs/findings.md` rests on vendor agreement, where three
+implementations agreeing on the same OS is a stronger claim than two agreeing
+across a platform boundary.
+
+The install step in `docker/Dockerfile` is written against what Keysight are
+known to ship and is **unverified**. It accepts a tarball with an installer
+script, loose `.deb`s, or a `.run`, and says which it found; once the real
+download is in hand, delete the branches it did not need.
+
+## TekVISA is not here
+
+TekVISA is Windows-only, and everything CI runs is Linux, so it has no column.
+`backends.py` still knows about it -- `--backend tek` works for anyone running
+the suite by hand on Windows, see [`../docs/windows.md`](../docs/windows.md) --
+but nothing automated can reach it.
+
+That is a real cost, honestly stated: it is one fewer independent
+implementation. It is outweighed by what dropping Windows buys, which is that
+the three vendors that remain are compared on the same kernel rather than two
+of them on Linux and one across an OS boundary where a disagreement might
+be about the platform.
+
 ## What happens next
 
 ```bash

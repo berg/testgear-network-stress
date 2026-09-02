@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "artifacts": [
+    {
+      "backend": "keysight",
+      "os": "linux",
+      "arch": "x86_64",
+      "key": "drivers/keysight/linux/IOLibrariesSuite-21.3.94-linux-x64.run",
+      "sha256": "cafad1e017a5fa03a81e8dc7cbbad160ede55532ea2c456d89be5f3f31ab30ab",
+      "bytes": 344445050,
+      "vendor_version": "Keysight IO Libraries 21.3.94",
+      "install": {
+        "kind": "linux-package"
+      },
+      "dest": "vendor/keysight/"
+    },
+    {
+      "backend": "ni",
+      "os": "linux",
+      "arch": "x86_64",
+      "key": "drivers/ni/linux/NILinux2026Q3DeviceDrivers.zip",
+      "sha256": "89c4a38fe6019e0791597646d060d66b492dd64cfd3fa3a1f6ff9eb5b8806296",
+      "bytes": 460773,
+      "vendor_version": "NI-VISA 2026 Q3",
+      "install": {
+        "kind": "apt-repo-deb",
+        "package": "ni-visa"
+      },
+      "dest": "vendor/ni/"
+    },
+    {
+      "backend": "rs",
+      "os": "linux",
+      "arch": "x86_64",
+      "key": "drivers/rs/linux/rsvisa_5.12.9_amd64.deb",
+      "sha256": "fa8a9e3805db3bb40bec92545a58a8640bf1998260f9b131ce56059fa6cf4c21",
+      "bytes": 3037030,
+      "vendor_version": "R&S VISA 5.12.9",
+      "install": {
+        "kind": "deb"
+      },
+      "dest": "vendor/rs/"
+    }
+  ]
+}

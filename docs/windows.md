@@ -1,9 +1,18 @@
-# Running on Windows (Keysight, TekVISA)
+# Running on Windows (TekVISA)
 
-Keysight IO Libraries and TekVISA are the two implementations this suite
-cannot reach from macOS or Linux containers, and both are worth having: every
-finding so far rests on two vendor implementations agreeing, and a third
-independent one is the cheapest way to harden that.
+**CI does not do this.** Every leg runs Linux, because all four implementations
+CI compares -- pyvisa-py, NI, R&S and Keysight -- have 64-bit Linux builds, and
+running them on one kernel means a difference between two columns is a
+difference between two implementations rather than between two machines. See
+[`ci.md`](ci.md).
+
+What is left here is TekVISA, which is Windows or nothing, and running the
+suite on Windows by hand -- which is worth doing occasionally on its own
+account, since plenty of people drive pyvisa-py from Windows.
+
+Keysight used to be the other reason for this page. It has a Linux build, so it
+moved into the container with the rest; see
+[`../vendor/README.md`](../vendor/README.md).
 
 ## Setup
 
@@ -20,6 +29,17 @@ makes VXI-11 easier to exercise there than on a developer Mac.
    present, so `visa32.dll` keeps pointing where you expect; this suite loads
    `ktvisa32.dll` by name and does not care which is preferred.
 
+**That advice is exactly wrong for TekVISA.** `tek` resolves to
+`C:\Windows\System32\visa32.dll`, which is the *generic* VISA shim, not a
+Tektronix-specific library -- so what it points at is decided by whichever
+implementation won the "preferred VISA" argument. On a machine with both,
+`--backend tek` may quietly measure Keysight and report it under Tektronix's
+name.
+
+So keep the two on separate machines. CI does this by construction: the matrix
+gives `keysight` and `tek` their own fresh runners, and that must never be
+optimised into one job.
+
 Then, from a checkout:
 
 ```powershell
@@ -29,8 +49,24 @@ cargo build --release --manifest-path server\Cargo.toml
 uv run python run_all.py --backend keysight --reports reports-keysight
 ```
 
-`run_all.py` is the cross-platform equivalent of `run_all.sh` -- same scripts,
-same order, same exit status -- so no bash is required.
+`run_all.py` is the sweep itself; `run_all.sh` is now a shim over it. Both take
+their script list from `testgear/suite.py`, so no bash is required and the two
+cannot drift.
+
+## Set TESTGEAR_PORTMAP explicitly
+
+Windows imposes no privileged-port restriction, so the portmapper binds 111
+without administrator rights -- which is what gets you the standard VXI-11
+resource name that vendor implementations accept. Pin it rather than letting
+the probe decide:
+
+```powershell
+$env:TESTGEAR_PORTMAP = "1"
+```
+
+Without it a run can quietly fall back to `TCPIP0::host,port::inst0::INSTR`,
+which is a pyvisa-py-only extension, and the whole transport then looks
+unsupported to any vendor library.
 
 ## Folding the results in
 

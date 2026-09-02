@@ -19,6 +19,7 @@ both runs agree on what X is called.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import re
@@ -104,6 +105,18 @@ def check(name: str, rule: str = "", protocols: Iterable[str] = ("vxi11", "hisli
     return wrap
 
 
+class _Attempt:
+    """Whether the block inside `Stats.attempt` got through."""
+
+    __slots__ = ("ok",)
+
+    def __init__(self) -> None:
+        self.ok = False
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
 class Stats:
     """Pass/fail bookkeeping for one script, with a summary and exit code."""
 
@@ -163,6 +176,45 @@ class Stats:
             print(f"  FAIL {cited}")
             if exc is not None and self.verbose:
                 traceback.print_exc()
+
+    @contextlib.contextmanager
+    def attempt(self, message: str, rule: str = ""):
+        """A call in setup whose failure is a FAIL, not a crashed script.
+
+        `run_checks` already turns any exception into a FAIL, so a registered
+        check that breaks costs one row. The imperative setup between checks
+        had no such net: a library that raised where it should have returned a
+        status took the whole script with it, and the thirty checks after it
+        vanished from the column -- which reads as "not applicable" rather than
+        "this run crashed". That is the failure 973ed45 and 6581660 were both
+        about, arriving through a third door.
+
+        Yields a flag that is true when the block succeeded, so the caller can
+        skip the part that depended on it:
+
+            with stats.attempt("SRQ events can be enabled", rule="...") as ok:
+                inst.enable_event(visa.SRQ, visa.QUEUE)
+            if ok:
+                ...
+        """
+        # Imported here, not at module scope: testgear.visa imports this
+        # module, so the dependency only closes at call time.
+        from testgear import visa as _visa
+
+        outcome = _Attempt()
+        try:
+            yield outcome
+        except Skip as exc:
+            self.skip(message, str(exc))
+        except _visa.BadCall:
+            # This suite calling VISA wrongly is not a finding about the
+            # backend, and must not be recorded as one. Let it out to exit 5.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.error(message, exc, rule=rule)
+        else:
+            outcome.ok = True
+            self.check(True, message, rule=rule)
 
     def skip(self, message: str, reason: str = "") -> None:
         """Record a check that did not run, and why.

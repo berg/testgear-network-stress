@@ -54,21 +54,34 @@ def main() -> int:
 
             try:
                 # -- 1. queued delivery, repeatedly -------------------------
-                inst.enable_event(visa.SRQ, visa.QUEUE)
-                received = 0
-                missed = 0
-                for _ in range(args.iterations):
-                    srq_trigger(inst)
-                    try:
-                        inst.wait_on_event(visa.SRQ, int(args.settle * 1000 + 2000))
-                        received += 1
-                    except Exception:  # noqa: BLE001
-                        missed += 1
-                stats.check(
-                    missed == 0,
-                    f"{received}/{args.iterations} queued SRQs arrived",
-                    rule="VPP-4.3 3.4.1",
-                )
+                # Enabling the event is itself a check. Upstream pyvisa-py
+                # answers VI_ERROR_INV_EVENT for SRQ over HiSLIP, and pyvisa
+                # turns that into a raise -- which used to take the whole
+                # script with it and leave thirty checks missing from the
+                # column rather than one of them failing.
+                with stats.attempt(
+                    "SRQ events can be enabled for queued delivery",
+                    rule="VPP-4.3 3.7.6",
+                ) as queued_ok:
+                    inst.enable_event(visa.SRQ, visa.QUEUE)
+
+                if queued_ok:
+                    received = 0
+                    missed = 0
+                    for _ in range(args.iterations):
+                        srq_trigger(inst)
+                        try:
+                            inst.wait_on_event(
+                                visa.SRQ, int(args.settle * 1000 + 2000)
+                            )
+                            received += 1
+                        except Exception:  # noqa: BLE001
+                            missed += 1
+                    stats.check(
+                        missed == 0,
+                        f"{received}/{args.iterations} queued SRQs arrived",
+                        rule="VPP-4.3 3.4.1",
+                    )
                 if args.protocol == "vxi11":
                     # Not a failure, but the reason this section is slow, and
                     # worth saying out loud so nobody spends an afternoon on
@@ -81,8 +94,8 @@ def main() -> int:
                         "second here because the interrupt RPC goes "
                         "unacknowledged; HiSLIP delivers them immediately"
                     )
-                inst.disable_event(visa.SRQ, visa.QUEUE)
-                inst.discard_events(visa.SRQ, visa.QUEUE)
+                    inst.disable_event(visa.SRQ, visa.QUEUE)
+                    inst.discard_events(visa.SRQ, visa.QUEUE)
 
                 # -- 2. handler delivery, including I/O from the handler -----
                 # Reading the status byte from inside the handler is the whole
@@ -101,8 +114,16 @@ def main() -> int:
                         done.set()
 
                 wrapped = inst.install_handler(visa.SRQ, handler)
-                inst.enable_event(visa.SRQ, visa.HANDLER)
+                with stats.attempt(
+                    "SRQ events can be enabled for handler delivery",
+                    rule="VPP-4.3 3.7.6",
+                ) as handler_ok:
+                    inst.enable_event(visa.SRQ, visa.HANDLER)
                 try:
+                    if not handler_ok:
+                        raise harness.Skip(
+                            "handler delivery could not be enabled"
+                        )
                     for i in range(min(args.iterations, 50)):
                         done.clear()
                         srq_trigger(inst)
@@ -125,15 +146,25 @@ def main() -> int:
                             f"status bytes seen: "
                             f"{sorted({hex(s) for s in fired})}"
                         )
+                except harness.Skip as exc:
+                    # The enable already recorded its own FAIL. Say once that
+                    # the checks depending on it are absent rather than
+                    # passing, and carry on to the next section.
+                    stats.skip("the handler-delivery checks", str(exc))
                 finally:
-                    inst.disable_event(visa.SRQ, visa.HANDLER)
+                    if handler_ok:
+                        inst.disable_event(visa.SRQ, visa.HANDLER)
                     inst.uninstall_handler(visa.SRQ, handler, wrapped)
 
                 # -- 3. SRQs racing against concurrent status queries --------
                 # This is the interleaving that used to corrupt a response: a
                 # service request landing between a status query and its
                 # answer.
-                inst.enable_event(visa.SRQ, visa.QUEUE)
+                with stats.attempt(
+                    "SRQ events can be re-enabled after handler delivery",
+                    rule="VPP-4.3 3.7.6",
+                ) as race_ok:
+                    inst.enable_event(visa.SRQ, visa.QUEUE)
                 bad_stb: list[str] = []
                 stop = threading.Event()
 
@@ -176,21 +207,28 @@ def main() -> int:
                 # dominated the whole suite's runtime -- 233s for this script
                 # against the mock, almost all of it here. The exact number is
                 # not the point of the check; that any arrived is.
-                drained = 0
-                drain_until = time.time() + 5.0
-                while drained < 10000 and time.time() < drain_until:
-                    response = inst.wait_on_event(visa.SRQ, 0, capture_timeout=True)
-                    if response.timed_out:
-                        break
-                    drained += 1
-                capped = " (drain capped)" if time.time() >= drain_until else ""
-                stats.note(
-                    f"{drained} service requests queued during the race{capped}"
-                )
-                stats.check(
-                    drained > 0, "the race actually produced service requests"
-                )
-                inst.disable_event(visa.SRQ, visa.QUEUE)
+                if race_ok:
+                    drained = 0
+                    drain_until = time.time() + 5.0
+                    while drained < 10000 and time.time() < drain_until:
+                        response = inst.wait_on_event(
+                            visa.SRQ, 0, capture_timeout=True
+                        )
+                        if response.timed_out:
+                            break
+                        drained += 1
+                    capped = (
+                        " (drain capped)" if time.time() >= drain_until else ""
+                    )
+                    stats.note(
+                        f"{drained} service requests queued during the "
+                        f"race{capped}"
+                    )
+                    stats.check(
+                        drained > 0,
+                        "the race actually produced service requests",
+                    )
+                    inst.disable_event(visa.SRQ, visa.QUEUE)
 
                 # -- 4. after all that, the session is still sane ------------
                 stats.check(

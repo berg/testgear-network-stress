@@ -14,19 +14,34 @@ nonsense until the frame it came from is visible.
 
     tools/artifact_matrix.py --out page.html \\
         --reports hislip=reports-hislip vxi11=reports-vxi11
+
+Which columns a directory contributes, in what order and under what label,
+comes from an `index.json` beside the reports when there is one -- written by
+whatever produced them, and listing every column that was *meant* to run. A
+column named there with no report still appears, carrying the reason. The
+alternative is what this used to do: name three backends in a constant, skip
+any file that was not there, and publish a table whose missing column reads as
+agreement between the ones that remain.
 """
 
 from __future__ import annotations
 
 import argparse
-import collections
 import html
 import json
+import sys
 from pathlib import Path
 
-ORDER = [("py", "PyVISA-py"), ("ni", "NI-VISA"), ("rs", "R&S VISA")]
-VERSIONS = {"NI-VISA": "libvisa 26.5.0", "R&S VISA": "librsvisa 5.12.9"}
-TITLES = {"hislip": "HiSLIP", "vxi11": "VXI-11"}
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from testgear import aggregate, backends  # noqa: E402
+
+#: Fallback column order when a directory has no index.json: pyvisa-py first,
+#: because it is the subject and the eye reads left to right, then the rest in
+#: the order the backend table lists them.
+FALLBACK_ORDER = list(backends.BACKENDS)
+
+HERE = Path(__file__).resolve().parent.parent
 
 STYLE = """
 :root{
@@ -76,6 +91,16 @@ h2.proto{font-family:var(--cond);font-weight:700;font-size:1.4rem;margin:0;
   letter-spacing:.01em}
 .card .ver{font-family:var(--mono);font-size:.72rem;color:var(--muted);
   margin-top:-.45rem}
+/* A column that produced nothing is drawn, dimmed and labelled. It is never
+   dropped: the gap where a column should be reads as agreement between the
+   implementations that remain, which is the opposite of what happened. */
+.card.dead{border-style:dashed;opacity:.75}
+.card.dead .ver{color:var(--skip)}
+.card .ver.crashed{color:var(--fail)}
+.card .ver.os{margin-top:0;letter-spacing:.04em;text-transform:uppercase}
+th.st .os{display:block;font-family:var(--mono);font-weight:400;
+  font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted)}
 .counts{display:flex;gap:1.25rem;font-variant-numeric:tabular-nums}
 .count{display:flex;flex-direction:column;line-height:1.15}
 .count b{font-family:var(--cond);font-size:1.5rem;font-weight:700}
@@ -101,6 +126,11 @@ tr.grp td{background:var(--rule-soft);font-family:var(--cond);font-weight:600;
   padding:.5rem .75rem}
 tr.differs{background:var(--fail-wash)}
 tr.differs td:first-child{box-shadow:inset 3px 0 0 var(--stripe)}
+/* The rows the whole exercise is for: pyvisa-py fails and every other
+   implementation passes. A thicker stripe, because "disagrees with a shipping
+   implementation of the same spec" is a much stronger claim than "disagrees
+   with the others somehow". */
+tr.pyonly td:first-child{box-shadow:inset 5px 0 0 var(--fail)}
 tr.allskip{background:var(--skip-wash)}
 .check{max-width:34rem}
 .rule{font-family:var(--mono);font-size:.68rem;color:var(--muted);display:block;
@@ -180,60 +210,121 @@ def summary_line(detail: str) -> str:
     return " ".join(text.split())
 
 
-def load(root: Path):
-    cols, lookups = [], []
-    for key, label in ORDER:
-        path = root / f"{key}.json"
-        if not path.exists():
-            continue
-        loaded = json.loads(path.read_text())
-        column = loaded[0] if isinstance(loaded, list) else loaded
-        column["short"] = label
-        cols.append(column)
-        lookups.append({r.get("key", r["name"]): r for r in column["results"]})
-    return cols, lookups
+def load(root: Path) -> list[dict]:
+    """Every column a directory contributes, in order, including dead ones.
 
+    With an `index.json` the list of columns is whatever was *planned*, so a
+    backend that was meant to run and did not still gets a column carrying its
+    reason. Without one -- a hand-run directory of `<backend>.json` -- fall
+    back to whatever is there, ordered by the backend table.
+    """
+    index = root / "index.json"
+    if index.exists():
+        planned = json.loads(index.read_text(encoding="utf-8"))
+        planned = planned.get("columns", planned)
+    else:
+        planned = [
+            {"id": path.stem, "backend": path.stem, "file": path.name}
+            for path in sorted(
+                aggregate.column_files(root),
+                key=lambda p: (
+                    FALLBACK_ORDER.index(p.stem)
+                    if p.stem in FALLBACK_ORDER
+                    else len(FALLBACK_ORDER),
+                    p.stem,
+                ),
+            )
+        ]
 
-def render_protocol(protocol: str, cols, lookups, out) -> None:
-    w = out.append
-    groups: dict[str, list] = collections.OrderedDict()
-    seen: set[str] = set()
-    for column in cols:
-        for r in column["results"]:
-            k = r.get("key", r["name"])
-            if k in seen:
-                continue
-            seen.add(k)
-            script, _, rest = r["name"].partition(": ")
-            groups.setdefault(script, []).append(
-                (k, rest or r["name"], r.get("rule", ""))
+    cols: list[dict] = []
+    for entry in sorted(planned, key=lambda e: e.get("order", 0)):
+        spec = backends.BACKENDS.get(entry.get("backend", entry.get("id", "")))
+        default_label = spec.name if spec else entry.get("id", "?")
+        path = root / entry.get("file", f"{entry.get('id', '')}.json")
+
+        column: dict
+        if path.exists():
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            column = loaded[0] if isinstance(loaded, list) else loaded
+        else:
+            # Planned, absent. Never dropped: a table with a column silently
+            # missing reads like agreement between the ones that remain.
+            column = {"results": [], "notes": [], "context": {}}
+            column.setdefault("status", "not-run")
+            column.setdefault(
+                "reason", entry.get("reason") or f"no report at {path.name}"
             )
 
-    differing = pyvisa_only = skipped_rows = 0
-    for rows in groups.values():
-        for k, _, _ in rows:
-            outcomes = [lk.get(k, {}).get("outcome", "-") for lk in lookups]
-            if len(set(outcomes)) > 1:
-                differing += 1
-            if set(outcomes) == {"SKIP"}:
-                skipped_rows += 1
-            if (
-                len(outcomes) == 3
-                and outcomes[0] == "FAIL"
-                and outcomes[1] == "PASS"
-                and outcomes[2] == "PASS"
-            ):
-                pyvisa_only += 1
+        column["label"] = entry.get("label") or column.get("label") or default_label
+        column["short"] = column["label"]
+        # The backend id, not the label, is what identifies the subject: two
+        # columns can be the same implementation on different platforms and
+        # carry the same label.
+        column["backend"] = entry.get("backend", entry.get("id", ""))
+        for key in ("id", "os_label", "vendor_version", "status", "reason"):
+            if entry.get(key):
+                column[key] = entry[key]
+        cols.append(column)
+    return cols
 
-    ctx = cols[0].get("context", {})
+
+def render_protocol(protocol: str, cols, out, prose: dict) -> None:
+    w = out.append
+    matrix = aggregate.build(cols)
+    titles = prose.get("protocol_titles", {})
+    versions = prose.get("versions", {})
+
+    groups = matrix.by_script()
+    unique = matrix.unique_failures()
+    unique_keys = {r.key for r in unique}
+    dead = [c for c in cols if aggregate.status(c) != "ok"]
+
+    ctx = next(
+        (c.get("context") for c in cols if aggregate.status(c) == "ok"), {}
+    ) or {}
     w('<section class="proto-block">')
-    w(f'<h2 class="proto">{esc(TITLES.get(protocol, protocol))}</h2>')
-    lede = (
-        f"{len(seen)} checks. {differing} differ between implementations, "
-        f"{pyvisa_only} of them failures unique to PyVISA-py."
+    w(f'<h2 class="proto">{esc(titles.get(protocol, protocol))}</h2>')
+    subject_name = next(
+        (aggregate.label(cols[i]) for i in matrix.subject_columns()), "PyVISA-py"
     )
-    if skipped_rows:
-        lede += f" {skipped_rows} could not run anywhere."
+    lede = (
+        f"{len(matrix.rows)} checks. {len(matrix.disagreements)} differ between "
+        f"implementations, {len(unique)} of them failures unique to "
+        f"{subject_name}."
+    )
+    if matrix.all_skipped:
+        lede += f" {len(matrix.all_skipped)} could not run anywhere."
+    # Stated separately from a dead column. These produced results and they are
+    # trustworthy; it is the checks that are missing, and a gap reads as "not
+    # applicable" unless something says otherwise.
+    labels = aggregate.display_labels(cols)
+    for i, column in enumerate(cols):
+        if column.get("errors"):
+            lede += (
+                f" {labels[i]} is missing {len(column['errors'])} script(s) "
+                f"that crashed ({', '.join(column['errors'])})."
+            )
+    if len(matrix.compared) < 2:
+        # compare.py says the same thing when it is handed one backend. A grid
+        # with a single column is a report, and calling its zero disagreements
+        # a result would be claiming agreement with nobody.
+        lede = (
+            f"{len(matrix.rows)} checks from a single implementation. "
+            f"Nothing was compared, so this section is a report rather than a "
+            f"comparison."
+        )
+    if dead:
+        # Said out loud, not just left as an empty column. The whole reason a
+        # dead column is drawn at all is that its absence would read as
+        # agreement between the implementations that did answer.
+        shown = aggregate.display_labels(cols)
+        names = ", ".join(
+            shown[i] for i, c in enumerate(cols) if aggregate.status(c) != "ok"
+        )
+        lede += (
+            f" {names} produced no results, so the counts above compare only "
+            f"the rest."
+        )
     w(f'<p class="lede">{esc(lede)}</p>')
     w('<div class="spec">'
       f'<span>resource <b>{esc(ctx.get("resource", "?"))}</b></span>'
@@ -241,57 +332,85 @@ def render_protocol(protocol: str, cols, lookups, out) -> None:
       "</div>")
 
     w('<div class="cards">')
-    for column in cols:
-        n = collections.Counter(r["outcome"] for r in column["results"])
-        p, f, s = n.get("PASS", 0), n.get("FAIL", 0), n.get("SKIP", 0)
-        total = max(p + f + s, 1)
-        version = VERSIONS.get(column["short"], ctx.get("pyvisa-py commit", ""))
-        w('<article class="card">')
+    for i, column in enumerate(cols):
+        st = aggregate.status(column)
+        n = matrix.counts(i)
+        p_, f_, s_ = n.get("PASS", 0), n.get("FAIL", 0), n.get("SKIP", 0)
+        total = max(p_ + f_ + s_, 1)
+        version = (
+            column.get("vendor_version")
+            or versions.get(column["short"])
+            or column.get("context", {}).get("pyvisa-py commit", "")
+        )
+        w(f'<article class="card{"" if st == "ok" else " dead"}">')
         w(f'<h3>{esc(column["short"])}</h3>')
-        w(f'<div class="ver">{esc(version)}</div>')
+        # Nested quotes in an f-string need 3.12; the vendor container is
+        # Ubuntu 22.04 and ships 3.10, so keep the lookup outside.
+        why = column.get("reason", "")
+        sub = version if st == "ok" else f"{st} \u2014 {why}"
+        w(f'<div class="ver">{esc(sub)}</div>')
+        if column.get("os_label"):
+            w(f'<div class="ver os">{esc(column["os_label"])}</div>')
+        if column.get("errors"):
+            w(f'<div class="ver crashed">{len(column["errors"])} script(s) '
+              f'crashed &mdash; those checks are absent, not passing</div>')
+        if st != "ok":
+            w("</article>")
+            continue
         w('<div class="counts">')
-        w(f'<div class="count p"><b>{p}</b><span>passed</span></div>')
-        w(f'<div class="count f"><b>{f}</b><span>failed</span></div>')
-        w(f'<div class="count s"><b>{s}</b><span>skipped</span></div>')
+        w(f'<div class="count p"><b>{p_}</b><span>passed</span></div>')
+        w(f'<div class="count f"><b>{f_}</b><span>failed</span></div>')
+        w(f'<div class="count s"><b>{s_}</b><span>skipped</span></div>')
         w("</div>")
-        w(f'<div class="bar"><i class="p" style="width:{100 * p / total:.1f}%"></i>'
-          f'<i class="f" style="width:{100 * f / total:.1f}%"></i>'
-          f'<i class="s" style="width:{100 * s / total:.1f}%"></i></div>')
+        w(f'<div class="bar"><i class="p" style="width:{100 * p_ / total:.1f}%"></i>'
+          f'<i class="f" style="width:{100 * f_ / total:.1f}%"></i>'
+          f'<i class="s" style="width:{100 * s_ / total:.1f}%"></i></div>')
         w("</article>")
     w("</div>")
 
+    def head_cell(column: dict) -> str:
+        # The OS belongs in the header. "Keysight on Windows disagrees with
+        # PyVISA-py on Linux" is a weaker claim than the same-OS one, and a
+        # column header that does not say which is which invites the stronger
+        # reading.
+        os_label = column.get("os_label")
+        os_html = f'<span class="os">{esc(os_label)}</span>' if os_label else ""
+        return f'<th class="st">{esc(column["short"])}{os_html}</th>'
+
     w('<div class="scroll"><table>')
     w("<thead><tr><th>Check</th>"
-      + "".join(f'<th class="st">{esc(c["short"])}</th>' for c in cols)
+      + "".join(head_cell(c) for c in cols)
       + "</tr></thead><tbody>")
     row_id = 0
     for script, rows in groups.items():
         w(f'<tr class="grp"><td colspan="{len(cols) + 1}">{esc(script)}</td></tr>')
-        for k, name, rule in rows:
+        for row in rows:
             row_id += 1
             uid = f"{protocol}-{row_id}"
-            cells, outcomes, details = [], set(), []
-            for lk, column in zip(lookups, cols):
-                r = lk.get(k)
-                if r is None:
-                    outcomes.add("none")
+            cells, details = [], []
+            for result, column in zip(row.cells, cols):
+                if result is None:
                     cells.append('<td class="st none">&mdash;</td>')
                     continue
-                outcome = r["outcome"]
-                outcomes.add(outcome)
-                text = reason(r) if outcome != "PASS" else ""
+                outcome = result["outcome"]
+                text = reason(result) if outcome != "PASS" else ""
                 if text:
                     details.append((column["short"], outcome, text))
                 cells.append(f'<td class="st {outcome}">{outcome}</td>')
 
             classes = []
-            if len(outcomes) > 1:
+            if row.differs:
                 classes.append("differs")
-            elif outcomes == {"SKIP"}:
+            elif row.all_skipped:
                 classes.append("allskip")
+            if row.key in unique_keys:
+                classes.append("pyonly")
             if details:
                 classes.append("expandable")
-            rule_html = f'<span class="rule">{esc(rule)}</span>' if rule else ""
+            rule_html = (
+                f'<span class="rule">{esc(row.rule)}</span>' if row.rule else ""
+            )
+            name = row.name.partition(": ")[2] or row.name
 
             if details:
                 marker = '<span class="caret" aria-hidden="true">&#9656;</span>'
@@ -321,54 +440,14 @@ def render_protocol(protocol: str, cols, lookups, out) -> None:
     w("</section>")
 
 
-FINDINGS = [
-    ("VPP-4.3 3.2.3", "<code>VI_ATTR_RSRC_SPEC_VERSION</code> is unsupported"),
-    ("VPP-4.3 3.2.5", "<code>VI_ATTR_MAX_QUEUE_LENGTH</code> is unsupported"),
-    ("VPP-4.3 3.3.2",
-     "<code>viClose(VI_NULL)</code> answers <code>VI_ERROR_INV_OBJECT</code> "
-     "rather than <code>VI_WARN_NULL_OBJECT</code>"),
-    ("VPP-4.3 3.4.2",
-     "a termination character of <code>0x1FF</code> is stored as <code>511</code>; "
-     "both vendors mask it to a byte"),
-    ("VPP-4.3 3.6.17",
-     "a 300-character shared-lock key is accepted, where 256 or more is an error"),
-    ("VPP-4.3 3.6.28",
-     "a nested exclusive lock is not reported; over VXI-11 the session waits out "
-     "its own timeout against a lock it already holds"),
-    ("VPP-4.3 3.6.32", "an unlock that leaves a lock still held is not reported"),
-    ("VPP-4.3 3.7.6",
-     "<code>viEnableEvent(VI_HNDLR)</code> succeeds with no handler installed"),
-    ("VPP-4.3 3.7.13",
-     "<code>VI_SUSPEND_HNDLR | VI_HNDLR</code> is accepted; the modes are "
-     "mutually exclusive"),
-    ("VPP-4.3 4.3.17",
-     "the resource class suffix is matched case-sensitively &mdash; "
-     "<code>::instr</code> is refused where <code>::INSTR</code> opens"),
-    ("VPP-4.3 5.1.12", "four required message-based attributes are missing"),
-    ("VPP-4.3 5.1.17",
-     "<code>VI_ATTR_TCPIP_PORT</code> and <code>VI_ATTR_TCPIP_NODELAY</code> "
-     "are missing"),
-    ("VPP-4.3 5.1.72",
-     "required operations raise a Python exception instead of returning a status"),
-    ("VXI-11 B.6.3",
-     "a <code>maxRecvSize</code> of zero wedges the session &mdash; "
-     "<code>viWrite</code> never returns"),
-    ("VPP-4.3 3.2.2",
-     "a stalled connection answers <code>VI_ERROR_IO</code> about 11&nbsp;s late; "
-     "NI-VISA answers <code>VI_ERROR_TSK_TIMEOUT</code> at 2001&nbsp;ms"),
-]
+def load_prose(path: Path) -> dict:
+    """The page's words: title, lede, findings, footer.
 
-VENDOR_FINDINGS = [
-    ("R&amp;S &middot; VPP-4.3 3.7.21",
-     "<code>viWaitOnEvent</code> does not dequeue an event whose type was "
-     "disabled after it arrived"),
-    ("R&amp;S &middot; IVI-6.1 2.6",
-     "shared locks over HiSLIP are refused outright with "
-     "<code>VI_ERROR_INV_PROTOCOL</code>"),
-    ("all three &middot; VPP-4.3 5.1.11",
-     "<code>VI_ATTR_TRIG_ID</code> is required of every INSTR resource and "
-     "supported by none of them on TCPIP"),
-]
+    Out of this file on purpose. A CI run that has just produced a new set of
+    results should not need a source edit to publish them, and a findings list
+    is prose -- it wants reviewing as prose, not as a Python literal.
+    """
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -380,39 +459,66 @@ def main() -> int:
         help="protocol=directory pairs, e.g. hislip=reports-hislip",
     )
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--prose",
+        default=str(HERE / "docs" / "matrix.json"),
+        help="JSON holding the page's title, lede and findings",
+    )
+    parser.add_argument(
+        "--full-page",
+        action="store_true",
+        help="emit a complete HTML document rather than body-only. The "
+        "artifact host wants the body; GitHub Pages wants the document.",
+    )
     args = parser.parse_args()
+
+    prose = load_prose(Path(args.prose))
 
     sections = []
     for pair in args.reports:
         protocol, _, directory = pair.partition("=")
-        cols, lookups = load(Path(directory))
+        cols = load(Path(directory))
         if not cols:
             print(f"no reports in {directory}")
             continue
-        sections.append((protocol, cols, lookups))
+        sections.append((protocol, cols))
 
     if not sections:
         return 4
 
     out: list[str] = []
     w = out.append
+    if args.full_page:
+        w("<!doctype html>")
+        w('<html lang="en"><head><meta charset="utf-8">')
+        w('<meta name="viewport" content="width=device-width,initial-scale=1">')
     # The artifact host reads the title from the first 8KB, and uses it as
     # the page's name in the tab and gallery. Keep it stable across redeploys.
-    w("<title>VISA Conformance Matrix</title>")
+    w(f'<title>{esc(prose.get("title", "VISA Conformance Matrix"))}</title>')
     w('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
       'family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700'
       '&family=IBM+Plex+Sans:wght@400;500&display=swap">')
     w(f"<style>{STYLE}</style>")
+    if args.full_page:
+        w("</head><body>")
     w('<div class="wrap">')
 
-    ctx = sections[0][1][0].get("context", {})
+    # The provenance block comes from the first column that actually ran. Taking
+    # it from a column that produced nothing would stamp the page with a python
+    # and a commit no result on it came from.
+    first = sections[0][1]
+    ctx = next(
+        (c.get("context") for c in first if aggregate.status(c) == "ok"), {}
+    ) or {}
+    # The eyebrow names the columns, so it has to be generated. It used to be a
+    # literal, which meant a fourth implementation could join the matrix and
+    # the masthead would still claim there were three.
+    named = " &middot; ".join(esc(n) for n in aggregate.display_labels(first))
     w('<header class="mast">')
-    w('<div class="eyebrow">PyVISA-py &middot; NI-VISA &middot; R&amp;S VISA</div>')
-    w("<h1>VISA Conformance Matrix</h1>")
-    w('<p class="lede">Spec-cited conformance checks over HiSLIP and VXI-11, run '
-      'from one container against one fault-injecting mock server. Rows where the '
-      'implementations disagree carry colour. Click any row with a caret for the '
-      'full failure or skip detail.</p>')
+    w(f'<div class="eyebrow">{named}</div>')
+    title = prose.get("title", "VISA Conformance Matrix")
+    w(f"<h1>{esc(title)}</h1>")
+    w(f'<p class="lede">{esc(prose.get("lede", ""))}</p>')
     w('<div class="spec">'
       f'<span>pyvisa <b>{esc(ctx.get("pyvisa", "?"))}</b></span>'
       f'<span>pyvisa-py <b>{esc(ctx.get("pyvisa-py commit", "?"))}</b></span>'
@@ -420,23 +526,23 @@ def main() -> int:
       "</div>")
     w("</header>")
 
-    for protocol, cols, lookups in sections:
-        render_protocol(protocol, cols, lookups, out)
+    for protocol, cols in sections:
+        render_protocol(protocol, cols, out, prose)
 
     w('<section class="findings">')
     w("<h4>Confirmed findings</h4>")
     w('<p class="lede" style="margin-bottom:.8rem">Checks PyVISA-py fails that '
       "both NI-VISA and R&amp;S VISA pass.</p>")
     w('<div class="scroll"><table><tbody>')
-    for clause, text in FINDINGS:
-        w(f"<tr><td>{clause}</td><td>{text}</td></tr>")
+    for entry in prose.get("findings", []):
+        w(f"<tr><td>{entry['clause']}</td><td>{entry['text']}</td></tr>")
     w("</tbody></table></div></section>")
 
     w('<section class="findings">')
     w("<h4>Findings elsewhere</h4>")
     w('<div class="scroll"><table><tbody>')
-    for who, text in VENDOR_FINDINGS:
-        w(f"<tr><td>{who}</td><td>{text}</td></tr>")
+    for entry in prose.get("vendor_findings", []):
+        w(f"<tr><td>{entry['who']}</td><td>{entry['text']}</td></tr>")
     w("</tbody></table></div></section>")
 
     w("""<script>
@@ -469,6 +575,8 @@ def main() -> int:
       "matter are those that stay skipped run after run &mdash; so every skip "
       "carries its reason.</footer>")
     w("</div>")
+    if args.full_page:
+        w("</body></html>")
 
     Path(args.out).write_text("\n".join(out), encoding="utf-8")
     print(f"{args.out}: {len(sections)} protocol section(s)")

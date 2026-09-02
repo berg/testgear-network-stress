@@ -32,16 +32,19 @@ RUN touch src/main.rs src/lib.rs && cargo build --release
 # ---------------------------------------------------------------------------
 FROM docker.io/library/ubuntu:22.04
 
-# `ni` or `rs`. Selects which installer step runs; everything else is shared.
+# `ni`, `rs`, or `py`. Selects which installer step runs; everything else is
+# shared. `py` installs no vendor library at all, which gives pyvisa-py's own
+# column an image built exactly like the vendors' -- same base, same Python,
+# same suite -- so a difference between the columns is a difference between the
+# implementations and not between two machines.
 ARG BACKEND=ni
 ENV BACKEND=${BACKEND}
 ENV DEBIAN_FRONTEND=noninteractive
 
-# git is not optional here. setuptools-scm shells out to it to derive
-# pyvisa-py's version at install time, and the provenance block shells out to
-# it again at run time to name the commit under test. Without it the install
-# fails outright and, if it did not, every report would be attributed to a
-# tree it could not identify.
+# git is not optional here. The provenance block shells out to it to name the
+# commit under test, and without it every report would be attributed to a tree
+# it could not identify. A result that cannot say what produced it is not
+# reproducible, and comparing trees is the whole point.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv git \
         ca-certificates curl gnupg \
@@ -116,24 +119,148 @@ RUN set -eux; \
     apt-get install -y -f --no-install-recommends || true; \
     rm -rf /var/lib/apt/lists/*
 
+# -- Keysight IO Libraries --------------------------------------------------
+# The third vendor column, and the reason there is no Windows leg: Keysight is
+# the only one of the two Windows-capable implementations with a 64-bit Linux
+# build, so it can be compared against NI and R&S on the same kernel rather
+# than across an OS boundary where a disagreement might be about the platform.
+#
+# The download is a BitRock InstallBuilder self-extractor -- an ELF binary, not
+# a shell script, so its options are not readable with `strings`. They came
+# from running `--help`:
+#
+#   --mode           gtk | xwindow | text | unattended   (default gtk)
+#   --unattendedmodeui none | minimal | minimalWithDialogs
+#   --enable-components / --disable-components
+#
+# `--mode unattended` is the one that matters; the default is a GTK dialog,
+# which in a build would simply hang.
+RUN set -eux; \
+    if [ "$BACKEND" != "keysight" ]; then echo "not a Keysight image, skipping"; exit 0; fi; \
+    run=$(ls /vendor/keysight/*.run 2>/dev/null | head -1 || true); \
+    if [ -z "$run" ]; then \
+        echo "NO KEYSIGHT .run IN vendor/keysight -- the image builds and the run reports it missing"; \
+        ls -la /vendor/keysight 2>/dev/null || true; \
+        exit 0; \
+    fi; \
+    # iproute2 before anything else. Their find-available-port.sh shells out to
+    # `ss` or `netstat`, and without one the installer logs "Finding available
+    # port failed" and then fails to install the Distributed Infrastructure and
+    # discovery services -- after which viOpenDefaultRM spends four minutes
+    # reaching for services that were never installed.
+    apt-get update; \
+    apt-get install -y --no-install-recommends iproute2 net-tools; \
+    echo "Keysight installer: $run"; \
+    cp "$run" /tmp/iols.run; \
+    chmod +x /tmp/iols.run; \
+    /tmp/iols.run --version || true; \
+    # Only what a TCPIP run needs. The GPIB and PXI components want kernel
+    # modules a container cannot load -- the same wall NI hits -- and the GUIs
+    # want a display.
+    /tmp/iols.run --mode unattended --unattendedmodeui none \
+        --enable-components iio,iom,lan,interfaces \
+        || /tmp/iols.run --mode unattended --unattendedmodeui none; \
+    rm -f /tmp/iols.run; \
+    # Their own scripts ship with CRLF line endings and will not parse on
+    # Linux: kt_iolsvisa_postinstall.sh dies on line 3 with $'\r': command not
+    # found, so the VISA post-install configuration never runs and TCPIP0 is
+    # never registered. Strip the carriage returns and run the ones that
+    # matter again.
+    for f in /opt/keysight/iolibs/.scripts/*.sh; do \
+        [ -f "$f" ] && sed -i 's/\r$//' "$f" || true; \
+    done; \
+    if [ -x /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh ]; then \
+        echo "re-running the VISA post-install that CRLF broke"; \
+        bash /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh \
+            /opt/keysight/iolibs "Ubuntu" || echo "  (still unhappy; the run will say so)"; \
+    fi; \
+    # -- let their own post-install run -----------------------------------
+    #
+    # Their suite installer fails to install KDI and the discovery service, and
+    # without the discovery service there is no TCPIP0 to open. Both failures
+    # are container artefacts, and neither is really about Keysight:
+    #
+    # DistributedInfrastructureService is Go using kardianos/service, and it
+    #   logs to syslog. With no /dev/log socket it dies with "Unix syslog
+    #   delivery error" -- which *masks* the real error and sends you chasing
+    #   the logger instead of the fault.
+    #
+    # kardianos/service also picks its init backend by looking for
+    #   /run/systemd/system. Absent, it falls through to sysv-init and runs
+    #   `service <name> start`, which fails, so the post-install aborts before
+    #   writing /var/lib/keysight/Distributed Infrastructure/version.ini -- the
+    #   marker the discovery-service installer checks for.
+    #
+    # Give it a syslog sink and that directory and it takes the systemd path,
+    # where the systemctl stub above answers. Their post-install then completes
+    # and writes the marker itself, which beats forging it: the file wants a
+    # section named for the product as the installer names it, [KDI], and
+    # guessing that is how an afternoon goes.
+    mkdir -p /run/systemd/system; \
+    python3 -c "import socket,os,threading,time;\
+os.path.exists('/dev/log') and os.unlink('/dev/log');\
+s=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM);s.bind('/dev/log');\
+threading.Thread(target=lambda:[s.recv(8192) for _ in iter(int,1)],daemon=True).start();\
+time.sleep(3600)" & \
+    syslog_pid=$!; \
+    sleep 2; \
+    ( cd /opt/keysight/iolibs/coreq_installers && \
+      ./KDI-linux-x64-installer.run --mode unattended --unattendedmodeui minimal \
+          --force true >/tmp/kdi-install2.log 2>&1 ) \
+      || echo "KDI install still unhappy; see /tmp/kdi-install2.log"; \
+    test -s "/var/lib/keysight/Distributed Infrastructure/version.ini" \
+        && echo "KDI post-install wrote its marker:" \
+        && cat "/var/lib/keysight/Distributed Infrastructure/version.ini" \
+        || echo "NO KDI MARKER -- the discovery service will refuse to install"; \
+    ( cd "/opt/keysight/Distributed Infrastructure" && ./kdi-controller >/tmp/kdi-build.log 2>&1 & ) ; \
+    sleep 8; \
+    ( cd /opt/keysight/iolibs/coreq_installers && \
+      ./discovery-service-linux-x64-installer.run --mode unattended \
+          --unattendedmodeui minimal --force true --interfaces lan \
+          >/tmp/ds-install.log 2>&1 ) \
+      || echo "discovery-service install failed; see /tmp/ds-install.log"; \
+    pkill -f kdi-controller || true; \
+    kill "$syslog_pid" 2>/dev/null || true; \
+    rm -f /dev/log; \
+    test -x /opt/keysight/iolibs/ds/io-ds \
+        && echo "discovery service installed: io-ds" \
+        || echo "NO io-ds -- TCPIP0 will not resolve and the run will say so"; \
+    ldconfig || true; \
+    rm -rf /var/lib/apt/lists/*; \
+    echo "installed Keysight libraries:"; \
+    find / -name "libktvisa32.so*" 2>/dev/null | head || true
+
+
 # -- python -----------------------------------------------------------------
-# pyvisa from pip; pyvisa-py from the tree under test, installed editable so
-# the provenance block reports the checkout and its commit rather than a
-# version stamped at package time.
-COPY pyvisa-py/ /pyvisa-py/
-# git refuses to operate on a repository owned by another user, which is what
-# a COPY-ed tree looks like. Without this, setuptools-scm sees no version and
-# the provenance block reports no commit.
-RUN git config --global --add safe.directory /pyvisa-py
+# pyvisa from pip, or from a git ref when a run wants to test what is current
+# rather than what is released.
+ARG PYVISA_REF=
 RUN python3 -m pip install --no-cache-dir --upgrade pip && \
-    python3 -m pip install --no-cache-dir pyvisa && \
-    python3 -m pip install --no-cache-dir -e /pyvisa-py
+    if [ -n "$PYVISA_REF" ]; then \
+        python3 -m pip install --no-cache-dir \
+            "git+https://github.com/pyvisa/pyvisa@${PYVISA_REF}"; \
+    else \
+        python3 -m pip install --no-cache-dir pyvisa; \
+    fi
+
+# pyvisa-py is NOT copied in. It is the tree under test, so baking it into the
+# image would invalidate every layer above it on each new commit -- and the
+# layer above it is NI's install, which pulls about a gigabyte from ni.com.
+# Mount the checkout at /pyvisa-py and pass --pyvisa-py, which puts it on both
+# sys.path and PYTHONPATH, so the subprocesses see it too.
+#
+# git refuses to operate on a repository owned by another user, which is what a
+# mounted tree looks like. Without this the provenance block reports no commit,
+# and a result that cannot name what produced it is not reproducible.
+RUN git config --global --add safe.directory /pyvisa-py
 
 WORKDIR /suite
 COPY testgear/ /suite/testgear/
 COPY checks/ /suite/checks/
 COPY reproducers/ /suite/reproducers/
-COPY compare.py run_all.sh /suite/
+COPY compare.py run_all.py run_all.sh /suite/
+COPY tools/ /suite/tools/
+COPY pyproject.toml /suite/
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --from=server /build/target/release/testgear-mock-server /usr/local/bin/
 

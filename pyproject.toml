@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "testgear-network-stress"
+version = "0.1.0"
+description = "Network stress and conformance checks for VISA implementations"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+
+# 3.10, not 3.11. The vendor container is Ubuntu 22.04 on purpose -- NI's
+# 24.04 support is newer and less well travelled -- and it ships 3.10.12.
+# Anything in testgear/ or checks/ that assumes 3.11 takes every vendor column
+# with it, and the failure arrives as a syntax error inside a container nobody
+# is watching.
+requires-python = ">=3.10"
+
+# pyvisa is deliberately unpinned. Testing what is current is the job: the full
+# run installs it from git main, and pinning here would quietly override that.
+# pyvisa-py is absent on purpose -- it is the subject, and it arrives as a
+# checkout via --pyvisa-py, which stamps the commit into every report.
+dependencies = ["pyvisa"]
+
+[project.optional-dependencies]
+sim = ["pyvisa-sim"]
+ci = ["boto3"]
+
+[tool.setuptools]
+packages = ["testgear"]

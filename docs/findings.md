@@ -238,11 +238,223 @@ found doing it. Worth treating as one defect with three instances rather than
 three defects: the pattern is an unimplemented operation raising rather than
 returning.
 
+### A HiSLIP status query desynchronises when a service request races it
+
+**Status:** open on upstream `main` (`3cc4fe9`), confirmed against both
+vendors. Fixed on `network-robustness` (`766d7de`). HiSLIP only; VXI-11 is
+unaffected in both trees.
+
+`viReadSTB` over HiSLIP is an `AsyncStatusQuery` on the async channel followed
+by a read of the `AsyncStatusResponse`. Upstream reads that response straight
+off the socket:
+
+```python
+send_msg(self._async, "AsyncStatusQuery", self._rmt, self._message_id)
+self._rmt = 0
+response = AsyncStatusResponse(self._async)      # protocols/hislip.py
+```
+
+But `AsyncServiceRequest` (message type 20) is **unsolicited**: IVI-6.1 has the
+server send it on that same async channel whenever the device requests service,
+with no relation to what the client last asked for. So a service request
+arriving between the query and its answer is not a fault condition, it is the
+ordinary case -- and what the client does with it is raise:
+
+```
+RuntimeError: expected message type 'AsyncStatusResponse',
+              received 'AsyncServiceRequest'
+```
+
+from the header check in `RxHeader.__init__`. Two things are wrong, in the
+familiar order. The lesser is that a `RuntimeError` crosses the VISA boundary
+where VPP-4.3 requires a status -- the same contract break as `viFlush` and
+`viSetBuf` above, and now the fourth instance. The greater is that the session
+is left desynchronised: the response the client was waiting for is still in the
+channel, so every later read is off by one message.
+
+`network-robustness` puts a reader thread on the async socket that splits
+service requests out from responses, which is what the channel's shape asks
+for.
+
+Both vendors handle it, so this is a disparity rather than a reading of the
+spec:
+
+| implementation | `status queries stayed intact while SRQs fired` |
+| --- | --- |
+| NI-VISA 26.5.0 | passes |
+| R&S VISA 5.12.9 | passes |
+| PyVISA-py upstream `main` | `RuntimeError` out of `viReadSTB` |
+| PyVISA-py `network-robustness` | passes |
+
+This one was invisible until recently. The check that catches it sits after an
+`enable_event(VI_EVENT_SERVICE_REQ)` that upstream answers with
+`VI_ERROR_INV_EVENT` -- SRQ over HiSLIP is simply not implemented there -- and
+the raise from *that* used to end the script, taking this and three other
+failures with it. See "Skips are not passes" in the README, and the same
+lesson at `viFlush` below: an unguarded call that aborts the run hides
+everything behind it.
+
+Reproduce:
+
+```bash
+./.venv/bin/python checks/03_srq.py --protocol hislip --pyvisa-py /path/to/upstream
+# "status queries stayed intact while SRQs fired"
+```
+
+### viClear over HiSLIP raises when a reply is still unread (VPP-4.3 3.2.3)
+
+**Status:** open on upstream `main` (`3cc4fe9`), confirmed against both
+vendors. Fixed on `network-robustness` (`766d7de`). HiSLIP only; VXI-11 passes
+in both trees.
+
+Write a query, do not read the answer, then call `viClear`. Discarding exactly
+that abandoned reply is what `viClear` is *for* -- and it is where upstream
+breaks:
+
+```
+RuntimeError: expected message type 'DeviceClearAcknowledge',
+              received 'DataEnd: bytearray(b'stale-marker\n')'
+```
+
+`device_clear_complete` sends `DeviceClearComplete` and then reads
+`DeviceClearAcknowledge` off the **sync** channel -- the same channel where the
+undelivered `DataEnd` from the abandoned reply is still queued. The pending
+data is not drained first, so the acknowledgement read finds it and the header
+check raises.
+
+VPP-4.3 3.2.3 types `viClear` as returning a `ViStatus`, so a Python exception
+is the wrong answer whatever the cause. But the cause is the more interesting
+half: the one operation whose job is to clear stale data is the one that
+stale data breaks, which means it can only be relied on when it was not needed.
+
+The damage outlives the call. The session stays desynchronised, and the large
+query that follows fails too:
+
+```
+RuntimeError: protocol synchronization error
+```
+
+Both vendors pass both halves of this on the same mock, over the same
+transport:
+
+| implementation | `clear discards an uncollected response` | `clear resyncs mid-message` |
+| --- | --- | --- |
+| NI-VISA 26.5.0 | passes | passes |
+| R&S VISA 5.12.9 | passes | passes |
+| PyVISA-py upstream `main` | `RuntimeError` | `RuntimeError` |
+| PyVISA-py `network-robustness` | passes | passes |
+
+Reproduce:
+
+```bash
+./.venv/bin/python checks/07_clear.py --protocol hislip --pyvisa-py /path/to/upstream
+# "viClear returns a status rather than raising (unread response)"
+```
+
+### HiSLIP reconnection fails partway through open/close churn, on Windows
+
+**Status:** open, **side not yet determined, and no longer exercised**.
+Reproduced on every CI run that saw it -- three of three -- on
+`windows-latest`, over HiSLIP, against upstream `main` (`3cc4fe9`).
+
+CI has since dropped Windows entirely: Keysight turned out to have a Linux
+build, which left TekVISA as the only reason to run there, and one Windows-only
+vendor did not justify the platform. So nothing reproduces this automatically
+any more. It is kept rather than retracted because it was seen three times out
+of three and stopped at the same cycle count twice, which is not the shape of a
+flake -- but it will not be settled by waiting, and the next person to run
+`04_concurrency` on Windows by hand is who settles it. See
+[`windows.md`](windows.md).
+
+`04_concurrency` ends by opening and closing the same resource twenty times,
+checking that threads and descriptors are reclaimed. On Windows the HiSLIP
+session stops being resolvable partway through:
+
+```
+VisaIOError: VI_ERROR_RSRC_NFOUND (-1073807343)
+```
+
+after seven of the twenty cycles, for a resource that had opened successfully
+seven times immediately before and that the run had been using throughout.
+
+**It stops at exactly seven, twice running.** The two runs that reported a
+count both got 7/20, which is the most informative thing about it: a timing
+race against a shared cloud runner would not land on the same number twice.
+Something is exhausted rather than delayed. A HiSLIP session is two TCP
+connections that the server pairs by session id, so fourteen connections into
+the churn is where to look -- a session-id or listener limit on the mock's
+side, or something the client is not releasing on close.
+
+**And the mock has exactly such a limit.** `server/src/hislip/server.rs` caps
+concurrent sessions at 16 and answers the seventeenth with a HiSLIP
+`FatalError` of `MaximumClientsExceeded` ("too many active sessions"). Sessions
+leave that registry through a `Drop` that spawns the removal, so a close whose
+teardown does not complete promptly leaves the entry behind. `04_concurrency`
+opens one session, then six in parallel, then churns -- which puts the count in
+the right neighbourhood by the seventh cycle if the earlier ones are not being
+reaped.
+
+That makes the mock the leading suspect, and this suite brings its own
+instrument precisely so that question gets asked. It is **not** settled: the
+arithmetic is suggestive rather than exact.
+
+It is also cheap to settle by hand, and does not need Windows to *disprove*.
+Raise `max_sessions` in `server/src/hislip/server.rs`, or add a log line where
+the cap is hit, and re-run `04_concurrency --protocol hislip` on Windows. If
+the churn gets further, the mock is the answer and the fix is ours. If it still
+stops at seven, the cap is a red herring and the client is back in the frame.
+
+The transport asymmetry is the useful part, because it holds *within a single
+run on a single machine*:
+
+| | Linux | Windows |
+| --- | --- | --- |
+| HiSLIP | 20/20 | **7/20** |
+| VXI-11 | 20/20 | 20/20 |
+
+VXI-11 churns the same resource on the same runner in the same job and does
+not fail. So this is not the runner being slow or the mock being generally
+unavailable -- something specific to reopening a *HiSLIP* connection on Windows
+does not survive repetition.
+
+**Which side it belongs to is exactly what is not yet known**, and this suite
+brings its own instrument, so that question has to be asked before the finding
+means anything. `VI_ERROR_RSRC_NFOUND` is what pyvisa-py raises when the HiSLIP
+`Instrument` constructor cannot establish its two sockets, and a fast
+close-then-reopen on Windows is equally consistent with the client not
+releasing something between sessions and with the mock not reaping what the
+client released. The second is ours, and on the evidence above it is the more
+likely of the two. Deciding between them wants a run against real hardware, or
+against a vendor implementation on the same Windows host -- which is what the
+Keysight and TekVISA legs will give once their installers are provisioned. If
+NI or Keysight churns cleanly where pyvisa-py does not, the answer is the
+client; if nothing churns cleanly on Windows over HiSLIP, the answer is the
+mock.
+
+Recorded now rather than after that, because it is the kind of thing that gets
+lost: it appears only in CI, only on a platform nobody here develops on, and
+until the churn loop was wrapped it ended the script and reported nothing at
+all -- the second sighting exists only because the loop now says how many
+cycles it completed.
+
+Reproduce (Windows):
+
+```powershell
+uv run python checks\04_concurrency.py --protocol hislip --pyvisa-py C:\path\to\upstream
+# "20 open/close cycles all reopen the resource"
+```
+
 ### What the vendor runs settled
 
 Both transports have now been through NI-VISA 26.5.0 and R&S VISA 5.12.9.
 **Eleven findings are confirmed over HiSLIP and eight over VXI-11** -- meaning
 pyvisa-py fails and both vendors pass. The HiSLIP set is the superset:
+
+> Two more have been confirmed against the same vendor reports since this
+> section was written -- the HiSLIP status-query race and the HiSLIP `viClear`,
+> both above. They are not folded into the table below because that table is
+> the account of one run, and both were found against upstream `main` rather
+> than the tree that run measured.
 
 | clause | what pyvisa-py does | HiSLIP | VXI-11 |
 | --- | --- | --- | --- |

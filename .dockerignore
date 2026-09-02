@@ -1,0 +1,18 @@
+# The build context, kept to what the image actually needs.
+#
+# Without this the context is ~everything: a local .venv, a Rust target
+# directory that can reach a gigabyte, every reports-* directory from every
+# past run, and the whole of .git. Worst of all it would sweep in vendor/ --
+# so a CI leg that had just fetched one vendor's installer would ship it to
+# the daemon while building a different vendor's image.
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+server/target/
+reports/
+reports-*/
+site/
+columns/
+*.html

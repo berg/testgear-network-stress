@@ -1,0 +1,215 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# One Linux leg, in the container.
+#
+# The container is not a convenience. Four things depend on it:
+#
+#   Port 111. testgear/server.py probes a privileged bind to decide whether to
+#   run the portmapper. On a bare runner the job is the unprivileged `runner`
+#   user, the probe fails, and the VXI-11 resource becomes the
+#   TCPIP0::host,port::inst0::INSTR extension -- which NI and R&S reject
+#   outright. The whole vendor VXI-11 half of the matrix would vanish. Inside
+#   the container the job is root and the bind succeeds. Default bridge
+#   networking, not --network host, so :111 is in its own namespace.
+#
+#   glibc. The Dockerfile builds the mock on bullseye to pin glibc 2.31
+#   against the Ubuntu 22.04 runtime. A binary built on ubuntu-latest (24.04,
+#   glibc 2.39) would not start, and that reads as a broken mock.
+#
+#   NI's install needs the systemctl stub and its daemons, and entrypoint.sh
+#   tells "library not found" (exit 10) from "found but would not initialise"
+#   (exit 11). That distinction is a diagnosis, not a detail.
+#
+#   pyvisa-py's own column comes from an image built exactly like the vendors'.
+name: linux leg
+
+on:
+  workflow_call:
+    inputs:
+      leg:
+        description: The leg descriptor, as JSON
+        type: string
+        required: true
+      pyvisa-py-repo:
+        type: string
+        default: pyvisa/pyvisa-py
+      pyvisa-py-ref:
+        type: string
+        default: main
+      pyvisa-ref:
+        description: A pyvisa git ref, or empty for the released package
+        type: string
+        default: ""
+      environment:
+        description: The environment gating the vendor credentials
+        type: string
+        default: ""
+    secrets:
+      # Not secret in the sense of confidential -- an ARN and a bucket name --
+      # but both embed the AWS account id, and `with:` inputs and `run:` blocks
+      # are printed verbatim in the log. On a public repository that publishes
+      # the account id for no reason. As secrets they are masked.
+      AWS_ROLE_ARN:
+        required: false
+      VENDOR_BUCKET:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  leg:
+    runs-on: ${{ fromJSON(inputs.leg).runs_on }}
+    timeout-minutes: 60
+    # Vendor legs name an environment; py legs pass "" and get none. The
+    # environment is what a fork PR cannot reach, so it is the gate -- an `if:`
+    # on a branch name would be enforced only by YAML a PR could edit.
+    environment: ${{ inputs.environment }}
+    # Lifted to job level because the `secrets` context is not available in a
+    # step's `if:` and `env` is. Empty on a non-vendor leg, so the rule at the
+    # top of docs/ci.md stays literally true: the job that clones and executes
+    # a caller-named tree does not carry these at all, even though they are
+    # identifiers rather than credentials.
+    env:
+      AWS_ROLE_ARN: ${{ fromJSON(inputs.leg).vendor && secrets.AWS_ROLE_ARN || '' }}
+      VENDOR_BUCKET: ${{ fromJSON(inputs.leg).vendor && secrets.VENDOR_BUCKET || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before anything that runs tools/. ubuntu-latest ships python3 but not
+      # necessarily `python`, and the fetch step needs it.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install what the tools need
+        run: python -m pip install --disable-pip-version-check boto3
+
+      - name: Clone the pyvisa-py under test
+        run: |
+          git clone --filter=blob:none \
+            "https://github.com/${{ inputs.pyvisa-py-repo }}" pyvisa-py
+          # Not --detach: for a branch this keeps the name, and the provenance
+          # block reports "0.8.1-79-g3cc4fe9 on main" rather than "on HEAD".
+          # A SHA detaches on its own anyway.
+          git -C pyvisa-py checkout "${{ inputs.pyvisa-py-ref }}"
+          git -C pyvisa-py --no-pager log -1 --oneline
+
+      # -- the vendor installer, for the legs that need one -----------------
+      # Only when the store has actually been provisioned. Between merging
+      # this and the AWS side existing, a vendor leg should report "no store
+      # configured" as an unavailable column -- which is a legible page -- and
+      # not fail the weekly run with an assume-role error that looks like a
+      # permissions problem.
+      - name: Assume the vendor-read role
+        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+
+      - name: Fetch the installer
+        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN != ''
+        run: |
+          set +e
+          python tools/fetch_vendor.py \
+            --backend "${{ fromJSON(inputs.leg).backend }}" \
+            --os linux \
+            --bucket "$VENDOR_BUCKET" \
+            --into vendor/
+          rc=$?
+          # 3 is "nobody has provisioned this one yet". That belongs on the
+          # page as a column saying so, not as a red job that stops the other
+          # legs from reporting.
+          if [[ $rc -eq 3 ]]; then
+            echo "not provisioned; the leg will report it unavailable"
+            exit 0
+          fi
+          exit $rc
+
+      # Before anything third-party runs. The tree under test is a caller-named
+      # repository at a caller-named ref, and nothing that executes it should be
+      # in a position to reach S3.
+      - name: Drop the AWS credentials
+        if: always()
+        run: |
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
+                   AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE \
+                   ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL; do
+            echo "$v=" >> "$GITHUB_ENV"
+          done
+
+      # -- the image --------------------------------------------------------
+      # No registry cache for a vendor image. On a public repo the Actions
+      # cache is readable by fork-PR workflows, and these installers are not
+      # redistributable.
+      - name: Note that no vendor store is configured
+        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN == ''
+        run: |
+          echo "::warning::no AWS_ROLE_ARN on this environment, so there is no"\
+               " installer to fetch. The image will build without one and the"\
+               " leg will report the backend unavailable."
+
+      - name: Build the image
+        run: |
+          docker build \
+            --build-arg "BACKEND=${{ fromJSON(inputs.leg).image }}" \
+            --build-arg "PYVISA_REF=${{ inputs.pyvisa-ref }}" \
+            -f docker/Dockerfile -t "testgear:${{ fromJSON(inputs.leg).id }}" .
+
+      - name: Does the backend load?
+        id: probe
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "$PWD/pyvisa-py:/pyvisa-py:ro" \
+            "testgear:${{ fromJSON(inputs.leg).id }}" check
+
+      # -- the run ----------------------------------------------------------
+      - name: Run both transports
+        if: steps.probe.outcome == 'success'
+        run: |
+          mkdir -p out
+          for proto in hislip vxi11; do
+            echo "::group::${{ fromJSON(inputs.leg).backend }} [$proto]"
+            docker run --rm \
+              -v "$PWD/out:/suite/out" \
+              -v "$PWD/pyvisa-py:/pyvisa-py:ro" \
+              "testgear:${{ fromJSON(inputs.leg).id }}" \
+              python3 compare.py \
+                --backends "${{ fromJSON(inputs.leg).backend }}" \
+                --protocol "$proto" \
+                --pyvisa-py /pyvisa-py \
+                --json "/suite/out/$proto.json" \
+                --exit-codes "/suite/out/$proto.rc.json" || true
+            echo "::endgroup::"
+          done
+          sudo chown -R "$(id -u):$(id -g)" out
+
+      # An exit-11 probe is the interesting failure -- installed, but would not
+      # initialise -- and it must reach the page as a column with that reason
+      # rather than as a job that went red and vanished.
+      - name: Record what this leg did
+        if: always()
+        env:
+          LEG: ${{ inputs.leg }}
+        run: |
+          mkdir -p out
+          extra=()
+          if [[ "${{ steps.probe.outcome }}" != "success" ]]; then
+            extra=(--status unavailable
+                   --reason "the backend did not load in the container; see the probe step")
+          fi
+          python tools/leg_status.py --leg "$LEG" --dir out --out out/leg.json \
+            --summary "$GITHUB_STEP_SUMMARY" "${extra[@]}"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ fromJSON(inputs.leg).id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14

@@ -78,6 +78,8 @@ rsync -az --delete \
 
 # The tree under test travels with it, so the container installs the same
 # commit this machine is looking at rather than whatever is on the far end.
+# .git travels with it now: the tree is mounted rather than built in, and the
+# provenance block shells out to git in it to name the commit under test.
 rsync -az --delete \
     --exclude '.venv/' --exclude '__pycache__/' --exclude '*.pyc' \
     --exclude 'build/' --exclude '*.egg-info/' \
@@ -100,7 +102,9 @@ for backend in $BACKENDS; do
 
     say "checking whether $backend loads"
     if ssh -o BatchMode=yes "$HOST" \
-        "cd $REMOTE_DIR && $CONTAINER run --rm localhost/testgear-$backend check"
+        "cd $REMOTE_DIR && $CONTAINER run --rm \
+         -v $REMOTE_DIR/pyvisa-py:/pyvisa-py:ro,Z \
+         localhost/testgear-$backend check"
     then
         built+=("$backend")
     else
@@ -124,8 +128,10 @@ for backend in "${built[@]}"; do
     say "running the checks under $backend ($PROTOCOL)"
     ssh -o BatchMode=yes "$HOST" \
         "cd $REMOTE_DIR && mkdir -p reports && $CONTAINER run --rm \
-         -v $REMOTE_DIR/reports:/suite/reports:Z localhost/testgear-$backend \
+         -v $REMOTE_DIR/reports:/suite/reports:Z \
+         -v $REMOTE_DIR/pyvisa-py:/pyvisa-py:ro,Z localhost/testgear-$backend \
          compare --protocol $PROTOCOL --json /suite/reports/$backend.json \
+         --exit-codes /suite/reports/$backend.rc.json \
          ${EXTRA[*]:-}" 2>&1 | tail -40
 done
 
@@ -136,9 +142,11 @@ done
 say "running the checks under pyvisa-py, in the same container"
 ssh -o BatchMode=yes "$HOST" \
     "cd $REMOTE_DIR && $CONTAINER run --rm \
-     -v $REMOTE_DIR/reports:/suite/reports:Z localhost/testgear-${built[0]} \
+     -v $REMOTE_DIR/reports:/suite/reports:Z \
+     -v $REMOTE_DIR/pyvisa-py:/pyvisa-py:ro,Z localhost/testgear-${built[0]} \
      python3 compare.py --backends py --protocol $PROTOCOL \
-     --json /suite/reports/py.json ${EXTRA[*]:-}" 2>&1 | tail -20
+     --pyvisa-py /pyvisa-py --json /suite/reports/py.json \
+     --exit-codes /suite/reports/py.rc.json ${EXTRA[*]:-}" 2>&1 | tail -20
 
 say "collecting reports"
 rsync -az "$HOST:$REMOTE_DIR/reports/" "$reports_local/" || die "could not collect reports"

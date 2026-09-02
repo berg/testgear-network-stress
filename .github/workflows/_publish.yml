@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Deploy the page. Separate from the aggregate job because this is the only
+# job in the whole run that holds a Pages token -- and the id-token here is
+# Pages' own OIDC, unrelated to the AWS one a vendor leg uses. They never meet.
+name: publish
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    # Deploys must not race: the site is replaced wholesale each time.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
