@@ -66,10 +66,13 @@ jobs:
     # on a branch name would be enforced only by YAML a PR could edit.
     environment: ${{ inputs.environment }}
     # Lifted to job level because the `secrets` context is not available in a
-    # step's `if:` and `env` is. The values are masked either way.
+    # step's `if:` and `env` is. Empty on a non-vendor leg, so the rule at the
+    # top of docs/ci.md stays literally true: the job that clones and executes
+    # a caller-named tree does not carry these at all, even though they are
+    # identifiers rather than credentials.
     env:
-      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-      VENDOR_BUCKET: ${{ secrets.VENDOR_BUCKET }}
+      AWS_ROLE_ARN: ${{ fromJSON(inputs.leg).vendor && secrets.AWS_ROLE_ARN || '' }}
+      VENDOR_BUCKET: ${{ fromJSON(inputs.leg).vendor && secrets.VENDOR_BUCKET || '' }}
     steps:
       - uses: actions/checkout@v4
 
