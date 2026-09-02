@@ -184,7 +184,7 @@ the docs use. Max session duration 1 hour (CI asks for 15 minutes).
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
         "token.actions.githubusercontent.com:sub":
-          "repo:berg/testgear-network-stress:environment:vendor-drivers"
+          "repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:vendor-drivers"
       }
     }
   }]
@@ -194,6 +194,24 @@ the docs use. Max session duration 1 hour (CI asks for 15 minutes).
 `StringEquals` throughout. **No wildcard anywhere in `sub`** — not
 `repo:berg/*`, not `...:environment:*`, not a `StringLike`. If the provisioning
 code makes that easy to get wrong, it is worth an assertion.
+
+**Those `@ID` suffixes are not decoration.** GitHub embeds immutable database
+ids in the subject — the owner and the repository each carry theirs. The first
+run against a real account failed every vendor leg with a bare
+`Not authorized to perform sts:AssumeRoleWithWebIdentity`, which says nothing
+about why. CloudTrail, which records the claims that actually arrived, does:
+
+```
+repo:berg@136931/testgear-network-stress@1348764395:environment:vendor-drivers
+```
+
+A policy written against the plain-name form matches nothing. The ids are the
+better key anyway: one survives a rename where a name does not. Get them with
+
+```bash
+gh api users/OWNER --jq .id
+gh api repos/OWNER/REPO --jq .id
+```
 
 The subject only contains `environment:vendor-drivers` when the job declares
 that GitHub Environment, and a fork pull request cannot enter one. That is why
