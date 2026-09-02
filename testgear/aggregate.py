@@ -8,11 +8,12 @@ whether a row where one implementation is simply absent counts as a
 disagreement. Those are not rendering details. They decide what the published
 page claims.
 
-The join itself is on `harness.stable_key`, never on the displayed name. Check
-names carry their measurements, which is right for reading one run and wrong
-for lining several up: two backends reporting different status codes produce
-two different names, so the row splits in two and each column shows a gap where
-the other one answered.
+The join itself is on `harness.stable_key`, never on the displayed name. Those
+are the same string today -- a check name is a static title and its evidence
+lives in `detail` -- but the distinction is the contract: a name that varies
+with its outcome splits into one row per backend, each showing a gap where the
+others answered, and keeping the join on the key is what makes that fixable in
+one place.
 """
 
 from __future__ import annotations
@@ -72,9 +73,9 @@ def merge(reports: list[dict], label: str) -> dict:
         for result in rep.get("results", []):
             entry = dict(result)
             entry["name"] = f"{script}: {result['name']}"
-            # Match on the masked key, display the full name. A check whose
-            # message carries its measurements would otherwise split into one
-            # row per backend, each showing a gap where the others answered.
+            # Match on the key, display the full name. A check whose message
+            # carried its measurements would otherwise split into one row per
+            # backend, each showing a gap where the others answered.
             entry["key"] = f"{script}: {result.get('key', result['name'])}"
             merged["results"].append(entry)
         merged["notes"].extend(rep.get("notes", []))
@@ -138,21 +139,16 @@ class Row:
     def label(self) -> str:
         """What to call this row in a matrix.
 
-        Not `name`. Check names carry their evidence -- "a read of a complete
-        message returns VI_SUCCESS, got <StatusCode.success: 0>" -- and the
-        union takes each row's name from the first column that has it, which is
-        pyvisa-py. So the row header was showing one implementation's
+        Not `name`. Names used to carry their evidence -- "a read of a
+        complete message returns VI_SUCCESS, got <StatusCode.success: 0>" --
+        and the union takes each row's name from the first column that has it,
+        which is pyvisa-py. So the row header was showing one implementation's
         measurement as though it were the check's identity, next to columns
         that may have answered something else entirely.
 
-        The masked key is the check's identity, which is why it is what the
-        columns are joined on. Show that, and let the per-column detail carry
-        what each one actually returned.
-
-        The `*` that stable_key leaves behind is shown as it is. Prettifying it
-        into an ellipsis looked better until `*IDN?` came out as `…IDN?` -- the
-        mask and a SCPI command star are the same character, and nothing in the
-        string says which is which.
+        The key is the check's identity, which is why it is what the columns
+        are joined on. Show that, and let the per-column detail carry what each
+        one actually returned.
         """
         _, _, rest = self.key.partition(": ")
         return rest or self.key

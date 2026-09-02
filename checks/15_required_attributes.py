@@ -99,7 +99,7 @@ def missing(inst, required) -> list[str]:
     return absent
 
 
-@check("VI_ATTR_TRIG_ID is absent everywhere, as 5.1.11 does not anticipate",
+@check("VI_ATTR_TRIG_ID is absent everywhere, as RULE 5.1.11 does not anticipate",
        rule="VPP-4.3 5.1.11")
 def check_trig_id_universally_absent():
     """A rule no implementation satisfies, recorded rather than prosecuted.
@@ -122,7 +122,7 @@ def check_trig_id_universally_absent():
         return "absent, as in every implementation measured"
 
 
-@check("every other attribute RULE 5.1.11 requires of an INSTR session",
+@check("every other attribute RULE 5.1.11 requires of an INSTR session is present",
        rule="VPP-4.3 5.1.11")
 def check_all_instr_attributes():
     with open_inst() as inst:
@@ -134,7 +134,7 @@ def check_all_instr_attributes():
         return f"all {len(ALL_INSTR)} present"
 
 
-@check("every attribute RULE 5.1.12 requires of a message-based session",
+@check("every attribute RULE 5.1.12 requires of a message-based session is present",
        rule="VPP-4.3 5.1.12")
 def check_message_based_attributes():
     """5.1.12 names TCPIP explicitly, so this applies to both transports."""
@@ -147,7 +147,7 @@ def check_message_based_attributes():
         return f"all {len(MESSAGE_BASED)} present"
 
 
-@check("every attribute RULE 5.1.16 requires of a TCPIP INSTR session",
+@check("every attribute RULE 5.1.16 requires of a TCPIP INSTR session is present",
        rule="VPP-4.3 5.1.16")
 def check_tcpip_attributes():
     with open_inst() as inst:
@@ -159,7 +159,7 @@ def check_tcpip_attributes():
         return f"all {len(TCPIP_INSTR)} present"
 
 
-@check("every attribute RULE 5.1.17 requires of a HiSLIP session",
+@check("every attribute RULE 5.1.17 requires of a HiSLIP session is present",
        rule="VPP-4.3 5.1.17", protocols=("hislip",))
 def check_hislip_attributes():
     """5.1.17 binds "a HiSLIP TCPIP system", so it does not apply to VXI-11.

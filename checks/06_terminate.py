@@ -86,11 +86,17 @@ def main() -> int:
                 t0 = time.time()
                 st = visa.status(lib.terminate, sess, 0, 0)
                 if st != StatusCode.success:
-                    stats.error(f"iteration {i}: viTerminate returned {st!r}")
+                    stats.error(
+                        "viTerminate reports VI_SUCCESS",
+                        detail=f"iteration {i} returned {st!r}",
+                    )
 
                 thread.join(timeout=blocked_timeout_s + 10.0)
                 if thread.is_alive():
-                    stats.error(f"iteration {i}: the blocked read never returned")
+                    stats.error(
+                        "viTerminate unblocks the pending read",
+                        detail=f"iteration {i}: the read never returned",
+                    )
                     break
 
                 durations.append(time.time() - t0)
@@ -130,19 +136,23 @@ def main() -> int:
                     got = inst.query("*IDN?").strip()
                 except Exception as exc:  # noqa: BLE001
                     stats.error(
-                        f"iteration {i}: session unusable after terminate", exc
+                        "the session is usable again after viTerminate",
+                        exc,
+                        detail=f"iteration {i}",
                     )
                     break
                 if got != idn:
                     stats.error(
-                        f"iteration {i}: after terminate *IDN? gave {got!r}"
+                        "the session is usable again after viTerminate",
+                        detail=f"iteration {i}: *IDN? gave {got!r}",
                     )
                     break
             else:
                 stats.check(
                     True,
-                    f"{args.iterations} terminate/recover cycles",
+                    "repeated terminate/recover cycles all succeed",
                     rule="VPP-4.3 3.2.3",
+                    detail=f"{args.iterations} cycles",
                 )
                 stats.note(
                     f"terminate + resync took {min(durations):.3f}-"
@@ -170,7 +180,7 @@ def main() -> int:
                         detail=f"got {st!r}")
             stats.check(
                 inst.query("*IDN?").strip() == idn,
-                "session healthy after an idle terminate",
+                "the session is healthy after an idle terminate",
             )
             visa.check_errors(inst, stats, "at end of run")
 

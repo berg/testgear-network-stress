@@ -120,7 +120,10 @@ def main() -> int:
                     if op == "query":
                         got = inst.query("*IDN?").strip()
                         if got != idn:
-                            stats.error(f"query returned {got!r}")
+                            stats.error(
+                                "*IDN? answers correctly under the soak mix",
+                                detail=f"returned {got!r}",
+                            )
                     elif op == "big_query":
                         if inst.query(big_query) != big:
                             stats.error("large query returned the wrong bytes")
@@ -141,7 +144,11 @@ def main() -> int:
                     elif op == "read_stb":
                         stb = inst.read_stb()
                         if not 0 <= stb <= 0xFF:
-                            stats.error(f"implausible status byte {stb!r}")
+                            stats.error(
+                                "read_stb returns a plausible status byte "
+                                "under the soak mix",
+                                detail=f"got {stb!r}",
+                            )
                     elif op == "trigger":
                         visa.status(
                             lib.assert_trigger, sess, constants.TriggerProtocol.default
@@ -150,7 +157,10 @@ def main() -> int:
                         mode = rng.choice(modes)
                         st = visa.status(lib.gpib_control_ren, sess, mode)
                         if st != StatusCode.success:
-                            stats.error(f"REN {mode.name} returned {st!r}")
+                            stats.error(
+                                f"REN {mode.name} is accepted under the soak mix",
+                                detail=f"got {st!r}",
+                            )
                     elif op == "lock":
                         kinds = [constants.Lock.exclusive]
                         if args.protocol == "hislip":
@@ -159,7 +169,10 @@ def main() -> int:
                         if st == StatusCode.success:
                             visa.status(lib.unlock, sess)
                         elif st != StatusCode.error_timeout:
-                            stats.error(f"lock returned {st!r}")
+                            stats.error(
+                                "viLock succeeds or times out under the soak mix",
+                                detail=f"got {st!r}",
+                            )
                     elif op == "clear":
                         if visa.status(lib.clear, sess) != StatusCode.success:
                             stats.error("viClear failed")
@@ -178,7 +191,10 @@ def main() -> int:
                         for command in ("*CLS", "*ESE 1", "*SRE 32", "*OPC"):
                             inst.write(command)
                 except Exception as exc:  # noqa: BLE001
-                    stats.error(f"operation {op!r} raised", exc)
+                    stats.error(
+                        f"the {op} operation never raises under the soak mix",
+                        exc,
+                    )
                     # Once the connection is gone every further operation
                     # fails instantly, which buries the first failure under
                     # thousands of identical ones. Stop instead.
@@ -203,7 +219,11 @@ def main() -> int:
                     )
                     last_report = time.time()
 
-            stats.check(True, f"{sum(tally.values())} mixed operations completed")
+            stats.check(
+                True,
+                "the mixed-operation soak ran to completion",
+                detail=f"{sum(tally.values())} operations",
+            )
             stats.note(
                 "operation mix: "
                 + ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
@@ -214,7 +234,8 @@ def main() -> int:
                 inst.uninstall_handler(visa.SRQ, handler, wrapped)
 
             stats.check(
-                inst.query("*IDN?").strip() == idn, "session healthy at the end"
+                inst.query("*IDN?").strip() == idn,
+                "the session is healthy at the end of the soak",
             )
             visa.check_errors(inst, stats, "at end of run")
 

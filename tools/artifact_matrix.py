@@ -458,9 +458,10 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
             rule_html = (
                 f'<span class="rule">{esc(row.rule)}</span>' if row.rule else ""
             )
-            # The masked key, not the name. A name carries the measurement of
-            # whichever column happened to be first, which is pyvisa-py -- so
-            # the row header was quoting one implementation at the others.
+            # The key, not the name. A name that carried a measurement would
+            # be whichever column happened to be first, which is pyvisa-py --
+            # so the row header would be quoting one implementation at the
+            # others.
             name = esc(row.label)
             if source_url and row.source:
                 href = f"{source_url.rstrip('/')}/{row.file}"

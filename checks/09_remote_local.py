@@ -139,7 +139,9 @@ def main() -> int:
                 st = set_ren(mode)
                 if mode in supported:
                     stats.check(
-                        st == StatusCode.success, f"REN {mode.name} accepted ({st!r})"
+                        st == StatusCode.success,
+                        f"REN {mode.name} is accepted",
+                        detail=f"got {st!r}",
                     )
                 else:
                     # Every implementation refuses these -- VXI-11 has no
@@ -153,7 +155,8 @@ def main() -> int:
                             StatusCode.error_nonsupported_operation,
                             StatusCode.error_invalid_mode,
                         ),
-                        f"REN {mode.name} is refused over VXI-11, got {st!r}",
+                        f"REN {mode.name} is refused over VXI-11",
+                        detail=f"got {st!r}",
                     )
 
             # -- 2. calibrate the oracle -------------------------------------
@@ -175,10 +178,10 @@ def main() -> int:
 
             if ratio < args.ratio:
                 stats.skip(
-                    "the remote/local state matrix: this instrument shows no "
-                    "usable throughput difference, so the state cannot be read "
-                    "back from here. A native HiSLIP instrument has no REN line "
-                    "and lands here"
+                    "each REN mode leaves the instrument in the state it names",
+                    "this instrument shows no usable throughput difference, so "
+                    "the state cannot be read back from here. A native HiSLIP "
+                    "instrument has no REN line and lands here",
                 )
                 visa.check_errors(inst, stats, "at end of run")
                 stats.write_outputs(args)
@@ -228,15 +231,19 @@ def main() -> int:
                 )
                 stats.check(
                     after == expected,
-                    f"{mode.name} leaves the instrument {expected}, "
-                    f"from {before} (saw {after}){note}",
+                    f"{mode.name} leaves the instrument {expected}{note}",
+                    detail=f"from {before}, saw {after}",
                 )
 
             for mode, reason in NOT_OBSERVABLE.items():
                 if mode not in supported:
                     continue
                 st = set_ren(mode)
-                stats.check(st == StatusCode.success, f"{mode.name} accepted ({st!r})")
+                stats.check(
+                    st == StatusCode.success,
+                    f"{mode.name} is accepted",
+                    detail=f"got {st!r}",
+                )
                 stats.note(f"{mode.name} effect not checked: {reason}")
 
             # -- 4. round trip, repeatedly ------------------------------------
@@ -253,7 +260,11 @@ def main() -> int:
                     break
                 flips += 1
             else:
-                stats.check(True, f"{flips} remote/local round trips")
+                stats.check(
+                    True,
+                    "repeated remote/local round trips all succeed",
+                    detail=f"{flips} round trips",
+                )
 
             # -- 5. leave it in remote -----------------------------------------
             set_ren(constants.RENLineOperation.asrt_address)

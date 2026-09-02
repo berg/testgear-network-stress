@@ -23,7 +23,6 @@ import contextlib
 import dataclasses
 import json
 import pathlib
-import re
 import sys
 import threading
 import time
@@ -43,39 +42,28 @@ class Skip(Exception):
     """Raised by a check that cannot run in this configuration."""
 
 
-#: Parts of a check name that vary between runs without changing what the
-#: check *is*: status-code reprs, measured numbers, quoted values, and the
-#: bracketed lists of sample failures.
-_VARIABLE = re.compile(
-    r"""
-      <[A-Za-z_]+\.[^>]*>          # <StatusCode.success: 0> and friends
-    | \[[^\]]*\]                   # ['a', 'b'] sample lists
-    | '[^']*' | "[^"]*"           # quoted values
-    | \b\d+(?:\.\d+)?\b          # measurements and counts
-    | \b(?:None|True|False)\b    # the value a backend returned, or did not
-    """,
-    re.VERBOSE,
-)
-
-
 def stable_key(name: str) -> str:
     """An identity for a check that survives its measurements changing.
 
-    Check names here carry their evidence -- "the final chunk (chunk=64)
-    reports VI_SUCCESS, got <StatusCode.success: 0>" -- which is exactly what
-    you want when reading one run and exactly wrong when lining several up
-    against each other: two backends reporting different status codes produce
-    two different names, so the row splits in two and each column shows a gap
-    where the other one answered.
+    Names used to carry their evidence -- "the final chunk (chunk=64) reports
+    VI_SUCCESS, got <StatusCode.success: 0>" -- which is what you want reading
+    one run and exactly wrong lining several up: two backends reporting
+    different status codes produced two names, so the row split in two and
+    each column showed a gap where the other one answered. This function
+    masked the parts that varied.
 
-    Masking the variable parts gives a key that matches across runs while the
-    displayed name keeps its evidence. It is a heuristic, and the failure mode
-    is benign in both directions: two genuinely different checks that mask to
-    the same key would merge (they would have to be near-identically worded),
-    and a name whose *wording* changes between versions splits, which is
-    honest -- it is a different check.
+    That is no longer how names are written. `check`, `error` and `skip` all
+    take a `detail`, the evidence goes there, and the name is a static title
+    of what is being checked -- so there is nothing left to mask, and masking
+    did real damage to what remained: it read the digits in "VXI-11",
+    "RULE 4.3.7" and "within 256 characters" as measurements, and the quoted
+    token in "an 'inst' device name selects VXI-11" as a captured value. The
+    published matrix showed "an * device name selects VXI-*".
+
+    So the key is the name. A check whose name still varies with its outcome
+    splits into two rows, which is a bug in that check and now looks like one.
     """
-    return _VARIABLE.sub("*", name).strip()
+    return name.strip()
 
 
 def _caller(depth: int = 2) -> str:
@@ -207,11 +195,18 @@ class Stats:
         message: str,
         exc: BaseException | None = None,
         rule: str = "",
+        detail: str = "",
         source: str = "",
     ) -> None:
+        """Record one failure.
+
+        `message` names it and, as in `check`, must not vary with the
+        outcome -- the observed value goes in `detail`.
+        """
         source = source or _caller()
         with self._lock:
-            detail = f"{message}: {type(exc).__name__}: {exc}" if exc else message
+            shown = f"{message} ({detail})" if detail else message
+            detail = f"{shown}: {type(exc).__name__}: {exc}" if exc else shown
             # Render the clause the same way check() does. It was being stored
             # and not shown, so a cited failure read as an uncited one in the
             # summary -- and whether a failure cites a clause is the property

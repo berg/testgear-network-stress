@@ -62,12 +62,13 @@ def main() -> int:
                 got = inst.query("*IDN?").strip()
                 if got != idn:
                     stats.error(
-                        f"iteration {i}: *IDN? returned {got!r}, expected {idn!r}"
+                        "*IDN? answers the same string on every query",
+                        detail=f"iteration {i} returned {got!r}, expected {idn!r}",
                     )
                     break
             else:
                 elapsed = time.time() - t0
-                stats.check(True, "small query storm")
+                stats.check(True, "a storm of small queries all answer correctly")
                 rate = args.iterations / elapsed
                 stats.note(
                     f"{args.iterations} queries in {elapsed:.2f}s ({rate:.0f}/s)"
@@ -75,7 +76,8 @@ def main() -> int:
                 if args.min_query_rate:
                     stats.check(
                         rate >= args.min_query_rate,
-                        f"query rate {rate:.0f}/s meets the floor of "
+                        "the query rate meets the configured floor",
+                        detail=f"{rate:.0f}/s against a floor of "
                         f"{args.min_query_rate:.0f}/s",
                     )
 
@@ -90,13 +92,14 @@ def main() -> int:
                     got = inst.query(big_query)
                     if got != reference:
                         stats.error(
-                            f"large read {i}: got {len(got)} bytes, "
-                            f"expected {len(reference)}"
+                            "a large response comes back identical every time",
+                            detail=f"read {i} got {len(got)} bytes, "
+                            f"expected {len(reference)}",
                         )
                         break
                 else:
                     elapsed = time.time() - t0
-                    stats.check(True, "large response storm")
+                    stats.check(True, "a storm of large-response queries all answer correctly")
                     throughput = big_iterations * len(reference) / elapsed / 1024
                     stats.note(
                         f"{big_iterations} x {len(reference)}B in {elapsed:.2f}s "
@@ -116,26 +119,31 @@ def main() -> int:
                         data, st = visa.call(lib.read, sess, chunk)
                         statuses.append(st)
                         if st not in READ_OK:
-                            stats.error(f"chunked read (chunk={chunk}) status {st!r}")
+                            stats.error(
+                                f"a chunked read of {chunk}B reports a readable status",
+                                detail=f"got {st!r}",
+                            )
                             break
                         if not data:
                             stats.error(
-                                f"chunked read (chunk={chunk}) returned no data"
+                                f"a chunked read of {chunk}B keeps returning data "
+                                f"until the message is complete",
+                                detail="a read returned no data",
                             )
                             break
                         pieces.append(data)
                     joined = b"".join(pieces).decode("latin-1")
                     stats.check(
                         joined == reference,
-                        f"a {len(reference)}B message read {chunk}B at a time "
-                        f"is intact",
+                        f"a large message read {chunk}B at a time is intact",
                         rule="VPP-4.3 RULE 6.1.2",
+                        detail=f"{len(reference)}B expected, {len(joined)}B read",
                     )
                     stats.check(
                         statuses and statuses[-1] == StatusCode.success,
-                        f"the final chunk (chunk={chunk}) reports VI_SUCCESS, "
-                        f"got {statuses[-1] if statuses else 'nothing'!r}",
+                        f"the final {chunk}B chunk reports VI_SUCCESS",
                         rule="VPP-4.3 RULE 6.1.1",
+                        detail=f"got {statuses[-1] if statuses else 'nothing'!r}",
                     )
 
             # -- 4. termination character handling ----------------------------
@@ -159,23 +167,29 @@ def main() -> int:
                         StatusCode.success_termination_character_read,
                     ):
                         stats.error(
-                            f"termchar read {i}: expected VI_SUCCESS or "
-                            f"VI_SUCCESS_TERM_CHAR, got {st!r}"
+                            "a termchar read reports VI_SUCCESS or "
+                            "VI_SUCCESS_TERM_CHAR",
+                            detail=f"read {i} got {st!r}",
                         )
                         break
                     if data.strip() != idn.encode():
-                        stats.error(f"termchar read {i}: got {data!r}")
+                        stats.error(
+                            "a termchar read returns the whole reply",
+                            detail=f"read {i} got {data!r}",
+                        )
                         break
                     if not data.endswith(b"\n"):
                         stats.error(
-                            f"termchar read {i} did not stop on the termchar"
+                            "a termchar read stops on the termination character",
+                            detail=f"read {i} did not stop on the termchar",
                         )
                         break
                 else:
                     stats.check(
                         True,
-                        f"termination character reads (last status {st!r})",
+                        "repeated termination-character reads all succeed",
                         rule="VPP-4.3 RULE 6.1.1",
+                        detail=f"last status {st!r}",
                     )
             finally:
                 inst.set_visa_attribute(RA.termchar_enabled, False)
@@ -209,16 +223,16 @@ def main() -> int:
                     )
                     stats.check(
                         len(collected) > 1,
-                        f"the response was split on the termchar "
-                        f"({len(collected)} reads)",
+                        "the response was split on the termchar",
                         rule="VPP-4.3 RULE 6.1.3",
+                        detail=f"{len(collected)} reads",
                     )
                 finally:
                     inst.set_visa_attribute(RA.termchar_enabled, False)
             else:
                 stats.skip(
-                    "the multi-line termchar checks: no multi-line response "
-                    "is available from this instrument"
+                    "a multi-line response reassembles across termchar reads",
+                    "no multi-line response is available from this instrument",
                 )
 
             # -- 5. send-end disabled ------------------------------------------
@@ -232,9 +246,10 @@ def main() -> int:
                 data, st = visa.call(lib.read, sess, 4096)
                 stats.check(
                     data is not None and data.strip() == idn.encode(),
-                    f"a message split across an unterminated and a terminated "
-                    f"write is reassembled by the instrument, got {data!r}",
+                    "a message split across an unterminated and a terminated "
+                    "write is reassembled by the instrument",
                     rule="VPP-4.3 3.2.1",
+                    detail=f"got {data!r}",
                 )
             except Exception as exc:  # noqa: BLE001
                 stats.error("split unterminated/terminated write failed", exc)

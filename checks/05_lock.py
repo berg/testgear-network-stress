@@ -59,18 +59,25 @@ def main() -> int:
             for i in range(args.iterations):
                 _, st = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
                 if st != StatusCode.success:
-                    stats.error(f"cycle {i}: lock returned {st!r}")
+                    stats.error(
+                        "repeated exclusive lock/unlock cycles all succeed",
+                        detail=f"cycle {i}: lock returned {st!r}",
+                    )
                     break
                 st = visa.status(lib.unlock, sess)
                 if st != StatusCode.success:
-                    stats.error(f"cycle {i}: unlock returned {st!r}")
+                    stats.error(
+                        "repeated exclusive lock/unlock cycles all succeed",
+                        detail=f"cycle {i}: unlock returned {st!r}",
+                    )
                     break
             else:
                 elapsed = time.time() - t0
                 stats.check(
                     True,
-                    f"{args.iterations} exclusive lock/unlock cycles",
+                    "repeated exclusive lock/unlock cycles all succeed",
                     rule="VPP-4.3 3.6.2.1",
+                    detail=f"{args.iterations} cycles",
                 )
                 stats.note(
                     f"{args.iterations} cycles in {elapsed:.2f}s "
@@ -104,17 +111,26 @@ def main() -> int:
                     # right (see docs/findings.md) but not this check's
                     # subject -- compare on the decoded value.
                     if st != StatusCode.success or _as_text(key) != "stress-shared":
-                        stats.error(f"shared cycle {i}: {st!r}, key={key!r}")
+                        stats.error(
+                            "repeated shared lock/unlock cycles all succeed",
+                            detail=f"cycle {i}: {st!r}, key={key!r}",
+                        )
                         break
                     if visa.status(lib.unlock, sess) != StatusCode.success:
-                        stats.error(f"shared cycle {i}: unlock failed")
+                        stats.error(
+                            "repeated shared lock/unlock cycles all succeed",
+                            detail=f"cycle {i}: unlock failed",
+                        )
                         break
                 else:
-                    stats.check(True, "shared lock/unlock cycles")
+                    stats.check(
+                        True, "repeated shared lock/unlock cycles all succeed"
+                    )
             else:
                 stats.skip(
-                    "the shared-lock cycles: VXI-11 locks are exclusive, "
-                    "per-link and non-nesting (RULE B.6.72)"
+                    "repeated shared lock/unlock cycles all succeed",
+                    "VXI-11 locks are exclusive, per-link and non-nesting "
+                    "(RULE B.6.72)",
                 )
 
             # -- 3. lock state tracking -------------------------------------
@@ -122,15 +138,17 @@ def main() -> int:
             state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
             stats.check(
                 st == StatusCode.success and state == constants.VI_EXCLUSIVE_LOCK,
-                f"lock state reads back as exclusive (status {st!r}, {state!r})",
+                "VI_ATTR_RSRC_LOCK_STATE reads back as exclusive",
                 rule="VPP-4.3 3.6.2.1",
+                detail=f"status {st!r}, value {state!r}",
             )
             visa.status(lib.unlock, sess)
             state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
             stats.check(
                 st == StatusCode.success and state == constants.VI_NO_LOCK,
-                f"lock state clears on unlock (status {st!r}, {state!r})",
+                "VI_ATTR_RSRC_LOCK_STATE clears on unlock",
                 rule="VPP-4.3 3.6.2.1",
+                detail=f"status {st!r}, value {state!r}",
             )
             stats.check(
                 visa.status(lib.unlock, sess) == StatusCode.error_session_not_locked,
@@ -163,16 +181,18 @@ def main() -> int:
 
             if not enforces_locks:
                 stats.skip(
-                    "lock contention: this server acknowledges a lock but does "
-                    "not enforce it -- session B was granted an exclusive lock "
-                    "while A held one and could still do I/O"
+                    "session B is refused while A holds the lock",
+                    "this server acknowledges a lock but does not enforce it -- "
+                    "session B was granted an exclusive lock while A held one "
+                    "and could still do I/O",
                 )
                 visa.status(other_lib.unlock, other_sess)
             else:
                 stats.check(
                     st_b != StatusCode.success,
-                    f"session B is refused while A holds the lock (got {st_b!r})",
+                    "session B is refused while A holds the lock",
                     rule="VPP-4.3 3.6.2.1",
+                    detail=f"got {st_b!r}",
                 )
                 stats.note(f"B waited {waited * 1000:.0f} ms before being refused")
 
@@ -207,8 +227,8 @@ def main() -> int:
                 visa.status(lib.unlock, sess)
             else:
                 stats.skip(
-                    "the shared-lock join: VXI-11 has no shared-lock concept "
-                    "(RULE B.6.72)"
+                    "session B joins the shared lock with A's key",
+                    "VXI-11 has no shared-lock concept (RULE B.6.72)",
                 )
 
             # -- 6. still healthy ---------------------------------------------

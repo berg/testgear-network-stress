@@ -71,17 +71,26 @@ def main() -> int:
             lib, sess = inst.visalib, inst.session
 
             idn = inst.query("*IDN?").strip()
-            stats.check(bool(idn), f"*IDN? -> {idn}")
+            stats.check(
+                bool(idn),
+                "*IDN? returns a non-empty identification string",
+                detail=idn,
+            )
             visa.drain_errors(inst)
 
             # -- read/write -------------------------------------------------
             count, st = visa.call(lib.write, sess, b"*IDN?\n")
-            stats.check(st == StatusCode.success, f"write status {st!r}")
+            stats.check(
+                st == StatusCode.success,
+                "viWrite reports VI_SUCCESS",
+                detail=f"got {st!r}",
+            )
             data, st = visa.call(lib.read, sess, 4096)
             stats.check(
                 st == StatusCode.success,
-                f"a read of a complete message returns VI_SUCCESS, got {st!r}",
+                "a read of a complete message returns VI_SUCCESS",
                 rule="VPP-4.3 RULE 6.1.1",
+                detail=f"got {st!r}",
             )
             stats.check(data.strip() == idn.encode(), "the read returned the *IDN? reply")
 
@@ -90,8 +99,9 @@ def main() -> int:
             data, st = visa.call(lib.read, sess, 4)
             stats.check(
                 st == StatusCode.success_max_count_read,
-                f"a short read reports VI_SUCCESS_MAX_CNT, got {st!r}",
+                "a short read reports VI_SUCCESS_MAX_CNT",
                 rule="VPP-4.3 RULE 6.1.2",
+                detail=f"got {st!r}",
             )
             rest, _ = visa.call(lib.read, sess, 4096)
             stats.check(
@@ -102,12 +112,20 @@ def main() -> int:
 
             # -- status byte ------------------------------------------------
             stb, st = visa.call(lib.read_stb, sess)
-            stats.check(st == StatusCode.success, f"read_stb status {st!r}")
+            stats.check(
+                st == StatusCode.success,
+                "viReadSTB reports VI_SUCCESS",
+                detail=f"got {st!r}",
+            )
             stats.note(f"status byte = {stb:#04x}")
 
             # -- trigger ----------------------------------------------------
             st = visa.status(lib.assert_trigger, sess, constants.TriggerProtocol.default)
-            stats.check(st == StatusCode.success, f"assert_trigger {st!r}")
+            stats.check(
+                st == StatusCode.success,
+                "viAssertTrigger reports VI_SUCCESS",
+                detail=f"got {st!r}",
+            )
             # An "undefined header" or "trigger ignored" in the error queue
             # here means the trigger *arrived* and the instrument had nothing
             # to do with it, which is itself proof the message got through.
@@ -142,15 +160,22 @@ def main() -> int:
                 )
 
             # -- clear ------------------------------------------------------
-            stats.check(visa.status(lib.clear, sess) == StatusCode.success, "viClear")
+            stats.check(
+                visa.status(lib.clear, sess) == StatusCode.success,
+                "viClear reports VI_SUCCESS",
+            )
             stats.check(
                 inst.query("*IDN?").strip() == idn, "the session works after viClear"
             )
 
             # -- locking ----------------------------------------------------
             key, st = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
-            stats.check(st == StatusCode.success, f"exclusive lock {st!r}",
-                        rule="VPP-4.3 3.6.2.1")
+            stats.check(
+                st == StatusCode.success,
+                "viLock takes an exclusive lock",
+                rule="VPP-4.3 3.6.2.1",
+                detail=f"got {st!r}",
+            )
             # VPP-4.3 leaves accessKey unused for an exclusive lock, so an
             # empty one is right -- but NI and R&S both hand back a generated
             # key regardless. Nothing depends on it being empty, so this is
@@ -170,21 +195,28 @@ def main() -> int:
             state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
             stats.check(
                 st == StatusCode.success and state == constants.VI_EXCLUSIVE_LOCK,
-                f"VI_ATTR_RSRC_LOCK_STATE reports the exclusive lock "
-                f"(status {st!r}, value {state!r})",
+                "VI_ATTR_RSRC_LOCK_STATE reports the exclusive lock",
                 rule="VPP-4.3 3.6.2.1",
+                detail=f"status {st!r}, value {state!r}",
             )
-            stats.check(visa.status(lib.unlock, sess) == StatusCode.success, "unlock")
+            stats.check(
+                visa.status(lib.unlock, sess) == StatusCode.success,
+                "viUnlock reports VI_SUCCESS",
+            )
             state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
             stats.check(
                 st == StatusCode.success and state == constants.VI_NO_LOCK,
-                f"VI_ATTR_RSRC_LOCK_STATE is clear after unlock "
-                f"(status {st!r}, value {state!r})",
+                "VI_ATTR_RSRC_LOCK_STATE is clear after unlock",
                 rule="VPP-4.3 3.6.2.1",
+                detail=f"status {st!r}, value {state!r}",
             )
 
             key, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "smoke-key")
-            stats.check(st == StatusCode.success, f"shared lock {st!r}")
+            stats.check(
+                st == StatusCode.success,
+                "viLock takes a shared lock",
+                detail=f"got {st!r}",
+            )
             if args.protocol == "hislip":
                 # bytes from NI-VISA, str from pyvisa-py. The type difference
                 # is a disparity in its own right (docs/findings.md); this
@@ -192,8 +224,9 @@ def main() -> int:
                 returned = key.decode("ascii", "replace") if isinstance(key, bytes) else key
                 stats.check(
                     returned == "smoke-key",
-                    f"a shared lock returns its key, got {key!r}",
+                    "a shared lock returns its access key",
                     rule="VPP-4.3 3.6.2.1",
+                    detail=f"got {key!r}",
                 )
             else:
                 # VXI-11 locks are exclusive, per-link and non-nesting
@@ -237,7 +270,11 @@ def main() -> int:
             for mode in constants.RENLineOperation:
                 st = visa.status(lib.gpib_control_ren, sess, mode)
                 if mode in expected_ok:
-                    stats.check(st == StatusCode.success, f"REN {mode.name} -> {st!r}")
+                    stats.check(
+                        st == StatusCode.success,
+                        f"REN {mode.name} is accepted",
+                        detail=f"got {st!r}",
+                    )
                 else:
                     # Every implementation refuses these -- VXI-11 has no
                     # RPC for driving REN without addressing -- but they
@@ -250,7 +287,8 @@ def main() -> int:
                             StatusCode.error_nonsupported_operation,
                             StatusCode.error_invalid_mode,
                         ),
-                        f"REN {mode.name} is refused over VXI-11, got {st!r}",
+                        f"REN {mode.name} is refused over VXI-11",
+                        detail=f"got {st!r}",
                     )
             # The enum ends on a deassert, which would leave a real instrument
             # in local mode. Put it back under remote control.
@@ -269,9 +307,10 @@ def main() -> int:
             )
             stats.check(
                 restored > baseline / 4,
-                f"throughput survives the REN walk ({baseline:.0f}/s -> "
-                f"{restored:.0f}/s). A large drop means the closing REN assert "
-                f"did not take effect and the instrument was left in local mode",
+                "throughput survives the REN walk",
+                detail=f"{baseline:.0f}/s -> {restored:.0f}/s; a large drop means the "
+                f"closing REN assert did not take effect and the instrument was "
+                f"left in local mode",
             )
 
             # -- flush --------------------------------------------------------
@@ -330,7 +369,8 @@ def main() -> int:
                     set_st == StatusCode.success
                     and get_st == StatusCode.success
                     and read == value,
-                    f"{label} (set {set_st!r}, read back {read!r})",
+                    label,
+                    detail=f"set {set_st!r}, read back {read!r}",
                 )
                 # Put it back: these are session-wide and the checks that
                 # follow assume the defaults.

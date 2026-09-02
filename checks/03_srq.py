@@ -79,8 +79,9 @@ def main() -> int:
                             missed += 1
                     stats.check(
                         missed == 0,
-                        f"{received}/{args.iterations} queued SRQs arrived",
+                        "every queued service request is delivered",
                         rule="VPP-4.3 3.4.1",
+                        detail=f"{received}/{args.iterations} arrived",
                     )
                 if args.protocol == "vxi11":
                     # Not a failure, but the reason this section is slow, and
@@ -128,14 +129,21 @@ def main() -> int:
                         done.clear()
                         srq_trigger(inst)
                         if not done.wait(5.0):
-                            stats.error(f"handler {i} never ran (deadlock?)")
+                            stats.error(
+                                "every service request runs the installed handler",
+                                detail=f"handler {i} never ran (deadlock?)",
+                            )
                             break
                     else:
-                        stats.check(True, f"{len(fired)} handler callbacks ran")
+                        stats.check(
+                            True,
+                            "every service request runs the installed handler",
+                            detail=f"{len(fired)} callbacks ran",
+                        )
                     stats.check(
                         not handler_errors,
-                        f"read_stb from inside the handler works "
-                        f"({handler_errors[:3]})",
+                        "read_stb from inside the handler works",
+                        detail=f"{handler_errors[:3]}",
                     )
                     stats.check(
                         all(isinstance(s, int) for s in fired),
@@ -198,9 +206,9 @@ def main() -> int:
 
                 stats.check(
                     not bad_stb,
-                    f"status queries stayed intact while SRQs fired "
-                    f"({bad_stb[:3]})",
+                    "status queries stayed intact while SRQs fired",
                     rule="VPP-4.3 3.3.1",
+                    detail=f"{bad_stb[:3]}",
                 )
                 # Bounded by wall clock as well as by count. The race can
                 # queue thousands of events, and draining them one at a time
@@ -233,7 +241,7 @@ def main() -> int:
                 # -- 4. after all that, the session is still sane ------------
                 stats.check(
                     inst.query("*IDN?").strip() == idn,
-                    "session healthy after SRQ load",
+                    "the session is healthy after the SRQ load",
                 )
                 visa.check_errors(inst, stats, "at end of run")
             finally:

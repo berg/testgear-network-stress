@@ -83,23 +83,30 @@ def main() -> int:
             t0 = time.time()
             for i in range(args.iterations):
                 status = clear_status(
-                    stats, lib, sess, f"{args.iterations} clear/query cycles"
+                    stats, lib, sess, "repeated clear/query cycles all succeed"
                 )
                 if status is None:
                     break
                 if status != StatusCode.success:
-                    stats.error(f"iteration {i}: viClear failed")
+                    stats.error(
+                        "repeated clear/query cycles all succeed",
+                        detail=f"iteration {i}: viClear failed",
+                    )
                     break
                 got = inst.query("*IDN?").strip()
                 if got != idn:
-                    stats.error(f"iteration {i}: after clear *IDN? gave {got!r}")
+                    stats.error(
+                        "repeated clear/query cycles all succeed",
+                        detail=f"iteration {i}: after clear *IDN? gave {got!r}",
+                    )
                     break
             else:
                 elapsed = time.time() - t0
                 stats.check(
                     True,
-                    f"{args.iterations} clear/query cycles",
+                    "repeated clear/query cycles all succeed",
                     rule="VPP-4.3 3.2.3",
+                    detail=f"{args.iterations} cycles",
                 )
                 stats.note(
                     f"{args.iterations} clears in {elapsed:.2f}s "
@@ -123,13 +130,16 @@ def main() -> int:
                 stale_value = inst.query(probe).strip()
             except Exception:  # noqa: BLE001
                 visa.drain_errors(inst)
-                stats.skip(f"the stale-response check: {probe} is unsupported here")
+                stats.skip(
+                    "clear discards an uncollected response",
+                    f"the probe query {probe} is unsupported here",
+                )
 
             if stale_value is not None and stale_value == idn:
                 stats.skip(
-                    f"the stale-response check: {probe} answers the same as "
-                    f"*IDN?, so a leaked reply is indistinguishable from a "
-                    f"fresh one"
+                    "clear discards an uncollected response",
+                    f"the probe query {probe} answers the same as *IDN?, so a "
+                    f"leaked reply is indistinguishable from a fresh one",
                 )
                 stale_value = None
 
@@ -142,14 +152,17 @@ def main() -> int:
                     if status is None:
                         break
                     if status != StatusCode.success:
-                        stats.error(f"unread-response iteration {i}: viClear failed")
+                        stats.error(
+                            "clear discards an uncollected response",
+                            detail=f"iteration {i}: viClear failed",
+                        )
                         break
                     got = inst.query("*IDN?").strip()
                     if got != idn:
                         stats.error(
-                            f"unread-response iteration {i}: stale data leaked, "
-                            f"got {got!r} (the abandoned {probe} response was "
-                            f"{stale_value!r})"
+                            "clear discards an uncollected response",
+                            detail=f"iteration {i}: stale data leaked, got {got!r} "
+                            f"(the abandoned {probe} response was {stale_value!r})",
                         )
                         break
                 else:
@@ -180,8 +193,9 @@ def main() -> int:
                     partial, _ = visa.call(lib.read, sess, 100)  # deliberately partial
                     if partial is None or len(partial) != 100:
                         stats.error(
-                            f"partial-read iteration {i}: got "
-                            f"{0 if partial is None else len(partial)} bytes"
+                            "clear resyncs mid-message",
+                            detail=f"iteration {i}: the partial read got "
+                            f"{0 if partial is None else len(partial)} bytes",
                         )
                         break
                     status = clear_status(
@@ -190,13 +204,16 @@ def main() -> int:
                     if status is None:
                         break
                     if status != StatusCode.success:
-                        stats.error(f"partial-read iteration {i}: viClear failed")
+                        stats.error(
+                            "clear resyncs mid-message",
+                            detail=f"iteration {i}: viClear failed",
+                        )
                         break
                     got = inst.query("*IDN?").strip()
                     if got != idn:
                         stats.error(
-                            f"partial-read iteration {i}: stream not resynced, "
-                            f"got {got!r}"
+                            "clear resyncs mid-message",
+                            detail=f"iteration {i}: stream not resynced, got {got!r}",
                         )
                         break
                 else:

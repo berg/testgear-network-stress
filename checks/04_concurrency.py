@@ -139,7 +139,11 @@ def main() -> int:
                 not any(w.is_alive() for w in workers),
                 "all worker threads stopped cleanly",
             )
-            stats.check(not problems, f"no concurrency problems ({problems[:3]})")
+            stats.check(
+                not problems,
+                "concurrent sessions ran without interfering",
+                detail=f"{problems[:3]}",
+            )
             stats.note(
                 f"in {duration:.0f}s: {counts['sync']} queries, {counts['stb']} "
                 f"status queries, {counts['lock']} lock cycles, "
@@ -156,7 +160,8 @@ def main() -> int:
                 "both channels were actually driven",
             )
             stats.check(
-                inst.query("*IDN?").strip() == idn, "session healthy after the load"
+                inst.query("*IDN?").strip() == idn,
+                "the session is healthy after the concurrent load",
             )
             visa.check_errors(inst, stats, "after single-session concurrency")
 
@@ -216,10 +221,10 @@ def main() -> int:
             thread.join(timeout=120.0)
         stats.check(
             not session_problems,
-            f"{args.sessions} parallel sessions behaved"
-            + (" (locked, as VXI-11 requires)" if needs_lock else "")
-            + f" ({session_problems[:3]})",
+            "parallel sessions to one instrument do not interfere"
+            + (" (locked, as VXI-11 requires)" if needs_lock else ""),
             rule="VPP-4.3 3.1.3",
+            detail=f"{args.sessions} sessions; {session_problems[:3]}",
         )
         stats.note(f"{args.sessions} parallel sessions in {time.time() - t0:.1f}s")
 
@@ -234,7 +239,7 @@ def main() -> int:
         # as a leak check that was never written.
         completed = 0
         with stats.attempt(
-            f"{cycles} open/close cycles all reopen the resource"
+            "repeated open/close cycles all reopen the resource"
         ) as churned:
             for _ in range(cycles):
                 with open_session() as churn:
@@ -250,22 +255,22 @@ def main() -> int:
         leaked_threads = threading.active_count() - base_threads
         stats.check(
             leaked_threads <= 1,
-            f"{completed} open/close cycles leaked no threads "
-            f"(delta {leaked_threads})",
+            "repeated open/close cycles leak no threads",
+            detail=f"{completed} cycles, delta {leaked_threads}",
         )
         # No fd directory to count on Windows. Saying so beats subtracting two
         # sentinels and reporting a delta of zero as a pass.
         if base_fds < 0:
             stats.skip(
-                f"{completed} open/close cycles leaked no descriptors",
+                "repeated open/close cycles leak no file descriptors",
                 "this platform exposes no open-descriptor count",
             )
         else:
             leaked_fds = visa.open_fd_count() - base_fds
             stats.check(
                 leaked_fds <= 2,
-                f"{completed} open/close cycles leaked no descriptors "
-                f"(delta {leaked_fds})",
+                "repeated open/close cycles leak no file descriptors",
+                detail=f"{completed} cycles, delta {leaked_fds}",
             )
         stats.note(
             f"after {completed} cycles: {threading.active_count()} threads, "
