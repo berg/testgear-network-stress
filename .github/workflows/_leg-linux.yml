@@ -77,11 +77,11 @@ jobs:
       AWS_ROLE_ARN: ${{ fromJSON(inputs.leg).vendor && secrets.AWS_ROLE_ARN || '' }}
       VENDOR_BUCKET: ${{ fromJSON(inputs.leg).vendor && secrets.VENDOR_BUCKET || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Before anything that runs tools/. ubuntu-latest ships python3 but not
       # necessarily `python`, and the fetch step needs it.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -106,7 +106,7 @@ jobs:
       # permissions problem.
       - name: Assume the vendor-read role
         if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -210,7 +210,7 @@ jobs:
 
       - name: Upload
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-${{ fromJSON(inputs.leg).id }}
           path: out/

@@ -43,8 +43,8 @@ jobs:
     outputs:
       verdict: ${{ steps.verdict.outcome }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -53,7 +53,7 @@ jobs:
       # "no artifact" into a column saying so.
       - name: Collect the legs
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: reports-*
@@ -110,7 +110,7 @@ jobs:
 
       - name: Upload the site
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: site
           path: site/
@@ -118,6 +118,6 @@ jobs:
 
       - name: Upload for Pages
         if: always() && inputs.pages
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site/
