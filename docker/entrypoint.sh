@@ -42,6 +42,36 @@ start_ni_daemons() {
     return 0
 }
 
+# Keysight's IO libraries need their services running before any interface is
+# configured. Without them viOpenDefaultRM succeeds and every viOpen fails with
+# VI_ERROR_INTF_NUM_NCONFIG -- "the interface type is valid but the specified
+# interface number is not configured" -- which is a confusing way to say that
+# TCPIP0 does not exist yet.
+#
+# Their own start_services.sh cannot do it here, twice over: it has CRLF line
+# endings and will not parse on Linux at all, and what it does is defer to
+# systemctl, which in this image is the stub the NI install needed. So start
+# the binaries directly, the same way start_ni_daemons does.
+start_keysight_services() {
+    local started=0
+    for service in /opt/keysight/iolibs/services/*; do
+        [[ -x "$service" ]] || continue
+        "$service" >"/tmp/$(basename "$service").log" 2>&1 &
+        started=$((started + 1))
+    done
+    if [[ $started -eq 0 ]]; then
+        echo "no Keysight service binaries found to start"
+        return 0
+    fi
+    echo "started $started Keysight service(s)"
+    # One of them segfaults on startup in a container and the rest carry on;
+    # the interfaces come up regardless, so this is reported rather than fatal.
+    sleep "${TESTGEAR_KEYSIGHT_SETTLE:-6}"
+    local alive
+    alive=$(pgrep -c -f "/opt/keysight/iolibs/services/" || true)
+    echo "  ${alive:-0} still running after settling"
+}
+
 banner "image: BACKEND=$BACKEND"
 echo "python: $(python3 --version 2>&1)"
 python3 -c 'import pyvisa; print("pyvisa:", pyvisa.__version__)' 2>&1 | tail -1
@@ -92,9 +122,11 @@ fi
 # probe below cannot report its version the way it does for the others. The
 # installer leaves one behind; read it, so the report can name what it ran
 # against rather than leaving the column unlabelled.
-if [[ "$BACKEND" == "keysight" ]] && [[ -r /opt/keysight/iolibs/version.txt ]]; then
-    banner "Keysight version"
-    echo "  IO Libraries $(cat /opt/keysight/iolibs/version.txt)"
+if [[ "$BACKEND" == "keysight" ]]; then
+    banner "Keysight runtime"
+    [[ -r /opt/keysight/iolibs/version.txt ]] \
+        && echo "IO Libraries $(cat /opt/keysight/iolibs/version.txt)"
+    start_keysight_services
 fi
 
 banner "does the backend load?"
@@ -133,6 +165,23 @@ try:
 except Exception as exc:
     # This is the interesting failure: installed but will not initialise.
     print(f"  FAILED to open a ResourceManager: {type(exc).__name__}: {exc}")
+    sys.exit(11)
+
+# Opening a ResourceManager is not enough, and believing it was cost an
+# afternoon. Keysight opens one happily with no interface configured and then
+# answers every viOpen with VI_ERROR_INTF_NUM_NCONFIG -- so the probe passed,
+# all seventeen scripts failed for one cause, and the report this file exists
+# to make came from reading a container log instead. Resolving a resource name
+# is the cheapest call that touches the interface tables, and it needs no
+# server to talk to.
+try:
+    info = rm.resource_info("TCPIP0::127.0.0.1::inst0::INSTR")
+    print(f"  TCPIP0 resolves: {info.interface_type!r}")
+except Exception as exc:
+    print(f"  TCPIP0 does not resolve: {type(exc).__name__}: {exc}")
+    print("  The library loaded but has no usable TCPIP interface, so every")
+    print("  viOpen would fail for one cause. Reported here rather than as a")
+    print("  column of identical failures.")
     sys.exit(11)
 PY
 load_rc=$?

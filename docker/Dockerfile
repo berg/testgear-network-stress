@@ -143,19 +143,39 @@ RUN set -eux; \
         ls -la /vendor/keysight 2>/dev/null || true; \
         exit 0; \
     fi; \
+    # iproute2 before anything else. Their find-available-port.sh shells out to
+    # `ss` or `netstat`, and without one the installer logs "Finding available
+    # port failed" and then fails to install the Distributed Infrastructure and
+    # discovery services -- after which viOpenDefaultRM spends four minutes
+    # reaching for services that were never installed.
+    apt-get update; \
+    apt-get install -y --no-install-recommends iproute2 net-tools; \
     echo "Keysight installer: $run"; \
     cp "$run" /tmp/iols.run; \
     chmod +x /tmp/iols.run; \
     /tmp/iols.run --version || true; \
     # Only what a TCPIP run needs. The GPIB and PXI components want kernel
     # modules a container cannot load -- the same wall NI hits -- and the GUIs
-    # want a display. Asking for them would turn a working VISA into a failed
-    # install for reasons that have nothing to do with what is being measured.
+    # want a display.
     /tmp/iols.run --mode unattended --unattendedmodeui none \
         --enable-components iio,iom,lan,interfaces \
         || /tmp/iols.run --mode unattended --unattendedmodeui none; \
     rm -f /tmp/iols.run; \
+    # Their own scripts ship with CRLF line endings and will not parse on
+    # Linux: kt_iolsvisa_postinstall.sh dies on line 3 with $'\r': command not
+    # found, so the VISA post-install configuration never runs and TCPIP0 is
+    # never registered. Strip the carriage returns and run the ones that
+    # matter again.
+    for f in /opt/keysight/iolibs/.scripts/*.sh; do \
+        [ -f "$f" ] && sed -i 's/\r$//' "$f" || true; \
+    done; \
+    if [ -x /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh ]; then \
+        echo "re-running the VISA post-install that CRLF broke"; \
+        bash /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh \
+            /opt/keysight/iolibs "Ubuntu" || echo "  (still unhappy; the run will say so)"; \
+    fi; \
     ldconfig || true; \
+    rm -rf /var/lib/apt/lists/*; \
     echo "installed Keysight libraries:"; \
     find / -name "libktvisa32.so*" 2>/dev/null | head || true
 
