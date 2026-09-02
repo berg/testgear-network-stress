@@ -76,6 +76,13 @@ jobs:
     env:
       AWS_ROLE_ARN: ${{ fromJSON(inputs.leg).vendor && secrets.AWS_ROLE_ARN || '' }}
       VENDOR_BUCKET: ${{ fromJSON(inputs.leg).vendor && secrets.VENDOR_BUCKET || '' }}
+      # The same question as `AWS_ROLE_ARN != ''`, asked once and kept as a
+      # plain boolean, because the steps below cannot ask it of the ARN. "Drop
+      # the AWS credentials" blanks AWS_ROLE_ARN in $GITHUB_ENV, so every step
+      # after it sees an empty one -- and the "no vendor store" warning, which
+      # sits after the drop, fired on every vendor leg of every run while the
+      # installer it was reporting missing had in fact been fetched.
+      HAVE_VENDOR_STORE: ${{ fromJSON(inputs.leg).vendor && secrets.AWS_ROLE_ARN != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -105,7 +112,7 @@ jobs:
       # not fail the weekly run with an assume-role error that looks like a
       # permissions problem.
       - name: Assume the vendor-read role
-        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN != ''
+        if: env.HAVE_VENDOR_STORE == 'true'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -114,7 +121,7 @@ jobs:
           mask-aws-account-id: true
 
       - name: Fetch the installer
-        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN != ''
+        if: env.HAVE_VENDOR_STORE == 'true'
         run: |
           set +e
           python tools/fetch_vendor.py \
@@ -149,11 +156,9 @@ jobs:
       # cache is readable by fork-PR workflows, and these installers are not
       # redistributable.
       - name: Note that no vendor store is configured
-        if: fromJSON(inputs.leg).vendor && env.AWS_ROLE_ARN == ''
+        if: fromJSON(inputs.leg).vendor && env.HAVE_VENDOR_STORE != 'true'
         run: |
-          echo "::warning::no AWS_ROLE_ARN on this environment, so there is no"\
-               " installer to fetch. The image will build without one and the"\
-               " leg will report the backend unavailable."
+          echo "::warning::AWS_ROLE_ARN is not set, so there is no installer to fetch. The image will build without one and the leg will report the backend unavailable."
 
       - name: Build the image
         run: |
