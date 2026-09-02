@@ -54,9 +54,19 @@ def merge(reports: list[dict], label: str) -> dict:
     legitimately use the same wording for different checks and collapsing them
     in the matrix would compare unrelated things.
     """
-    merged: dict = {"label": label, "results": [], "notes": [], "context": {}}
+    merged: dict = {
+        "label": label,
+        "results": [],
+        "notes": [],
+        "context": {},
+        # Per-script wall clock, kept so the page can say where a run's time
+        # goes. It is recorded per report and was being dropped here.
+        "elapsed": {},
+    }
     for rep in reports:
         script = rep.get("script", "?")
+        if rep.get("elapsed") is not None:
+            merged["elapsed"][script] = rep["elapsed"]
         if not merged["context"]:
             merged["context"] = dict(rep.get("context", {}))
         for result in rep.get("results", []):
@@ -114,6 +124,15 @@ class Row:
     #: column recorded one. The same check lives at the same line whoever ran
     #: it, so the first answer is as good as any.
     source: str = ""
+
+    @property
+    def file(self) -> str:
+        """`checks/01_smoke.py`, without the line number."""
+        return self.source.partition(":")[0]
+
+    @property
+    def line(self) -> str:
+        return self.source.partition(":")[2]
 
     @property
     def label(self) -> str:
@@ -227,9 +246,14 @@ class Matrix:
         return collections.Counter(r["outcome"] for r in column.get("results", []))
 
     def by_script(self) -> "collections.OrderedDict[str, list[Row]]":
+        """Rows grouped by the file they live in.
+
+        By file rather than by the script's display name: the name is prose
+        ("smoke (hislip)") and the file is what you open.
+        """
         groups: collections.OrderedDict[str, list[Row]] = collections.OrderedDict()
         for row in self.rows:
-            groups.setdefault(row.script, []).append(row)
+            groups.setdefault(row.file or row.script, []).append(row)
         return groups
 
 

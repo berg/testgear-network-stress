@@ -133,8 +133,13 @@ tr.differs td:first-child{box-shadow:inset 3px 0 0 var(--stripe)}
 tr.pyonly td:first-child{box-shadow:inset 5px 0 0 var(--fail)}
 /* The check name links to the line that asserts it. Underlined only on hover:
    every row would otherwise be a wall of blue. */
-a.src{color:inherit;text-decoration:none}
-a.src:hover{text-decoration:underline;text-decoration-style:dotted}
+a.src{color:var(--muted);text-decoration:none;font-family:var(--mono);
+  font-size:.68rem;opacity:0;transition:opacity .1s}
+tr:hover a.src,a.src:focus{opacity:1}
+a.src:hover{color:var(--accent);text-decoration:underline}
+tr.grp a.src{opacity:1;color:inherit;font-family:inherit;font-size:inherit}
+.grp-time{float:right;font-family:var(--mono);font-size:.68rem;
+  color:var(--muted);font-weight:400}
 tr.allskip{background:var(--skip-wash)}
 .check{max-width:34rem}
 .rule{font-family:var(--mono);font-size:.68rem;color:var(--muted);display:block;
@@ -391,7 +396,31 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
       + "</tr></thead><tbody>")
     row_id = 0
     for script, rows in groups.items():
-        w(f'<tr class="grp"><td colspan="{len(cols) + 1}">{esc(script)}</td></tr>')
+        # The group header names the file and says what it cost each column.
+        # Where a run's time goes is otherwise invisible, and it is not evenly
+        # spread: 03_srq dominates, because VXI-11 service requests arrive
+        # about one a second.
+        times = []
+        for column in cols:
+            elapsed = column.get("elapsed") or {}
+            secs = next(
+                (v for k, v in elapsed.items() if rows and k in rows[0].name), None
+            )
+            if secs is not None:
+                # Sub-second scripts are most of them; rounding to whole
+                # seconds renders the fast ones as "0s" and hides the spread.
+                shown = f"{secs:.1f}s" if secs < 10 else f"{secs:.0f}s"
+                times.append(f"{aggregate.label(column)} {shown}")
+        timing = (
+            f'<span class="grp-time">{esc(" · ".join(times))}</span>' if times else ""
+        )
+        head = esc(script)
+        if source_url and script:
+            head = (
+                f'<a class="src" href="{esc(source_url.rstrip("/"))}/{esc(script)}">'
+                f"{head}</a>"
+            )
+        w(f'<tr class="grp"><td colspan="{len(cols) + 1}">{head}{timing}</td></tr>')
         for row in rows:
             row_id += 1
             uid = f"{protocol}-{row_id}"
@@ -423,13 +452,15 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
             # the row header was quoting one implementation at the others.
             name = esc(row.label)
             if source_url and row.source:
-                path, _, line = row.source.partition(":")
-                href = f"{source_url.rstrip('/')}/{path}"
-                if line:
-                    href += f"#L{line}"
-                name = (
-                    f'<a class="src" href="{esc(href)}" '
-                    f'title="{esc(row.source)}">{name}</a>'
+                href = f"{source_url.rstrip('/')}/{row.file}"
+                if row.line:
+                    href += f"#L{row.line}"
+                # A small marker, not the whole label: the label is the thing
+                # being read, and turning it into a link makes every row look
+                # like a navigation element.
+                name += (
+                    f' <a class="src" href="{esc(href)}" '
+                    f'title="{esc(row.source)}">[source]</a>'
                 )
 
             if details:
