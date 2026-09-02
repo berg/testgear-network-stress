@@ -166,7 +166,12 @@ class Stats:
 
     # -- recording ---------------------------------------------------------
     def check(
-        self, condition: bool, message: str, rule: str = "", detail: str = ""
+        self,
+        condition: bool,
+        message: str,
+        rule: str = "",
+        detail: str = "",
+        source: str = "",
     ) -> bool:
         """Record one check.
 
@@ -175,7 +180,10 @@ class Stats:
         fails appears as a *missing* result rather than a failing one. Put the
         observed value in `detail`, which is reported either way.
         """
-        source = _caller()
+        # A caller that already knows the interesting frame passes it in;
+        # `attempt` does, or every block it wraps would be attributed to the
+        # line inside this file that records it.
+        source = source or _caller()
         with self._lock:
             shown = f"{message} ({detail})" if detail else message
             if condition:
@@ -194,8 +202,14 @@ class Stats:
                 print(f"  FAIL {cited}")
             return bool(condition)
 
-    def error(self, message: str, exc: BaseException | None = None, rule: str = "") -> None:
-        source = _caller()
+    def error(
+        self,
+        message: str,
+        exc: BaseException | None = None,
+        rule: str = "",
+        source: str = "",
+    ) -> None:
+        source = source or _caller()
         with self._lock:
             detail = f"{message}: {type(exc).__name__}: {exc}" if exc else message
             # Render the clause the same way check() does. It was being stored
@@ -235,28 +249,30 @@ class Stats:
         # module, so the dependency only closes at call time.
         from testgear import visa as _visa
 
+        # The block the caller wrote, not the line below that records it.
+        where = _caller(3)
         outcome = _Attempt()
         try:
             yield outcome
         except Skip as exc:
-            self.skip(message, str(exc))
+            self.skip(message, str(exc), source=where)
         except _visa.BadCall:
             # This suite calling VISA wrongly is not a finding about the
             # backend, and must not be recorded as one. Let it out to exit 5.
             raise
         except Exception as exc:  # noqa: BLE001
-            self.error(message, exc, rule=rule)
+            self.error(message, exc, rule=rule, source=where)
         else:
             outcome.ok = True
-            self.check(True, message, rule=rule)
+            self.check(True, message, rule=rule, source=where)
 
-    def skip(self, message: str, reason: str = "") -> None:
+    def skip(self, message: str, reason: str = "", source: str = "") -> None:
         """Record a check that did not run, and why.
 
         The reason is what the report shows in place of a result, so a skip
         reads as an explained absence rather than as a silent pass.
         """
-        source = _caller()
+        source = source or _caller()
         with self._lock:
             detail = f"{message}: {reason}" if reason else message
             self.skipped.append(detail)
