@@ -11,8 +11,11 @@ name: full run
 
 on:
   schedule:
-    # Weekly. The NI image alone pulls about a gigabyte from ni.com.
-    - cron: "0 4 * * 0"
+    # Nightly. It was weekly when a run meant rebuilding three vendor images
+    # and a sweep that ran every script at 200 iterations; both are cheaper
+    # now, and a regression is worth finding the next morning rather than the
+    # next Sunday.
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 permissions:

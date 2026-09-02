@@ -67,7 +67,8 @@ STYLE = """
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
-  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  overflow-x:hidden}
 .wrap{max-width:76rem;margin:0 auto;padding:2.5rem 1.25rem 5rem;
   display:flex;flex-direction:column;gap:2.5rem}
 .mast{display:flex;flex-direction:column;gap:.5rem}
@@ -134,9 +135,8 @@ tr.pyonly td:first-child{box-shadow:inset 5px 0 0 var(--fail)}
 /* The check name links to the line that asserts it. Underlined only on hover:
    every row would otherwise be a wall of blue. */
 a.src{color:var(--muted);text-decoration:none;font-family:var(--mono);
-  font-size:.68rem;opacity:0;transition:opacity .1s}
-tr:hover a.src,a.src:focus{opacity:1}
-a.src:hover{color:var(--accent);text-decoration:underline}
+  font-size:.68rem;white-space:nowrap}
+a.src:hover,a.src:focus{color:var(--accent);text-decoration:underline}
 tr.grp a.src{opacity:1;color:inherit;font-family:inherit;font-size:inherit}
 .grp-time{float:right;font-family:var(--mono);font-size:.68rem;
   color:var(--muted);font-weight:400}
@@ -161,8 +161,8 @@ tr.expandable[aria-expanded="true"] .caret{transform:rotate(90deg)}
 tr.detail-row td{padding:0 .75rem .9rem;background:var(--rule-soft)}
 .detail-block{margin-top:.75rem;border-left:2px solid var(--rule);
   padding-left:.85rem}
-.detail-head{font-family:var(--cond);font-size:.78rem;font-weight:600;
-  letter-spacing:.04em;color:var(--muted);margin-bottom:.15rem}
+.detail-head{font-size:.78rem;font-weight:600;
+  letter-spacing:.02em;color:var(--muted);margin-bottom:.15rem}
 .detail-head .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;
   letter-spacing:.05em;margin-right:.45rem}
 .detail-head .tag.FAIL{color:var(--fail)}
@@ -170,8 +170,8 @@ tr.detail-row td{padding:0 .75rem .9rem;background:var(--rule-soft)}
 .detail-sum{font-size:.82rem;margin-bottom:.4rem;max-width:80ch}
 .detail-block pre{font-family:var(--mono);font-size:.72rem;line-height:1.5;
   margin:0;padding:.6rem .7rem;background:var(--panel);
-  border:1px solid var(--rule);border-radius:3px;
-  overflow-x:auto;white-space:pre;color:var(--ink)}
+  border:1px solid var(--rule);border-radius:3px;color:var(--ink);
+  white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 .findings{background:var(--panel);border:1px solid var(--rule);border-radius:3px;
   padding:1rem 1.15rem}
 .findings table{min-width:34rem;font-size:.82rem}
@@ -183,6 +183,17 @@ footer{color:var(--muted);font-size:.78rem;border-top:1px solid var(--rule);
   padding-top:1rem;max-width:70ch}
 a{color:var(--accent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:38rem){
+  /* The grid has to fit the screen. A min-width sized for a laptop turns
+     every row into a sideways scroll on a phone, and the outcome columns are
+     the part worth seeing without moving. */
+  table{min-width:0;font-size:.78rem}
+  td.check{white-space:normal;overflow-wrap:anywhere}
+  th.st,td.st{padding-left:.35rem;padding-right:.35rem}
+  .grp-time{float:none;display:block;margin-top:.15rem}
+  .wrap{padding-left:.85rem;padding-right:.85rem}
+  .detail-block pre{font-size:.68rem}
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 """
 

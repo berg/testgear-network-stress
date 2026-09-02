@@ -5,7 +5,7 @@ Two workflows, and a rule that holds both of them up.
 | Workflow | What it runs | Publishes | Triggers |
 | --- | --- | --- | --- |
 | [`pyvisa-py.yml`](../.github/workflows/pyvisa-py.yml) | the pyvisa-py column only, both transports, Linux and Windows | no | `pull_request`, `workflow_dispatch` (repo + ref), nightly |
-| [`full-run.yml`](../.github/workflows/full-run.yml) | every implementation, both transports | GitHub Pages | weekly, `workflow_dispatch` |
+| [`full-run.yml`](../.github/workflows/full-run.yml) | every implementation, both transports | GitHub Pages | nightly, `workflow_dispatch` |
 
 Everything else is a reusable workflow the two of them call: `_plan`,
 `_leg-linux`, `_aggregate`, `_publish`.
@@ -96,9 +96,10 @@ layer containing it:
 Of the two rules here this is the one to actually enforce, and it is the one
 most likely to be undone by a well-meaning speed optimisation — the NI image takes eight to twelve minutes to build, and caching
 it is the obvious thing to reach for. The `py` image has nothing proprietary in
-it and *is* safe to cache; the vendor ones are not. If the build time becomes
-intolerable, the answer is a **private** GHCR package pushed only from `main`,
-not a cache.
+it and *is* safe to cache; the vendor ones are not. If the build time ever becomes
+intolerable the answer is a **private** GHCR package pushed only from `main` --
+never a cache. It is not needed today: trimming the Keysight components took
+that image from about eight minutes to two and a half.
 
 ## What makes a run red
 
