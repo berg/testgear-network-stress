@@ -153,13 +153,24 @@ RUN set -eux; \
     echo "Keysight installer: $run"; \
     cp "$run" /tmp/iols.run; \
     chmod +x /tmp/iols.run; \
-    /tmp/iols.run --version || true; \
+    timeout 120 /tmp/iols.run --version </dev/null || true; \
     # Only what a TCPIP run needs. The GPIB and PXI components want kernel
     # modules a container cannot load -- the same wall NI hits -- and the GUIs
     # want a display.
-    /tmp/iols.run --mode unattended --unattendedmodeui none \
-        --enable-components iio,iom,lan,interfaces \
-        || /tmp/iols.run --mode unattended --unattendedmodeui none; \
+    #
+    # </dev/null and a timeout on every invocation, because this is a `docker
+    # build`: there is no TTY, and anything that decides to read stdin blocks
+    # forever with no output. It ran fine under podman and hung for eighteen
+    # minutes on a GitHub runner, which is exactly the difference an EOF on
+    # stdin makes. A timeout turns "the build is wedged" into a failure with a
+    # line number.
+    #
+    # No fallback to the full component set either: that one pulls in the GPIB
+    # and PXI kernel drivers, so if the trimmed install is what hung, retrying
+    # with more of it is the wrong instinct.
+    timeout 1800 /tmp/iols.run --mode unattended --unattendedmodeui none \
+        --enable-components iio,iom,lan,interfaces </dev/null \
+        || echo "IOLS install failed or timed out; the run will report the backend missing"; \
     rm -f /tmp/iols.run; \
     # Their own scripts ship with CRLF line endings and will not parse on
     # Linux: kt_iolsvisa_postinstall.sh dies on line 3 with $'\r': command not
@@ -171,8 +182,9 @@ RUN set -eux; \
     done; \
     if [ -x /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh ]; then \
         echo "re-running the VISA post-install that CRLF broke"; \
-        bash /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh \
-            /opt/keysight/iolibs "Ubuntu" || echo "  (still unhappy; the run will say so)"; \
+        timeout 300 bash /opt/keysight/iolibs/.scripts/kt_iolsvisa_postinstall.sh \
+            /opt/keysight/iolibs "Ubuntu" </dev/null \
+            || echo "  (still unhappy; the run will say so)"; \
     fi; \
     # -- let their own post-install run -----------------------------------
     #
@@ -197,16 +209,16 @@ RUN set -eux; \
     # section named for the product as the installer names it, [KDI], and
     # guessing that is how an afternoon goes.
     mkdir -p /run/systemd/system; \
-    python3 -c "import socket,os,threading,time;\
+    ( python3 -c "import socket,os,threading,time;\
 os.path.exists('/dev/log') and os.unlink('/dev/log');\
 s=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM);s.bind('/dev/log');\
 threading.Thread(target=lambda:[s.recv(8192) for _ in iter(int,1)],daemon=True).start();\
-time.sleep(3600)" & \
-    syslog_pid=$!; \
+time.sleep(3600)" </dev/null >/dev/null 2>&1 & ) ; \
     sleep 2; \
     ( cd /opt/keysight/iolibs/coreq_installers && \
-      ./KDI-linux-x64-installer.run --mode unattended --unattendedmodeui minimal \
-          --force true >/tmp/kdi-install2.log 2>&1 ) \
+      timeout 900 ./KDI-linux-x64-installer.run --mode unattended \
+          --unattendedmodeui minimal --force true \
+          </dev/null >/tmp/kdi-install2.log 2>&1 ) \
       || echo "KDI install still unhappy; see /tmp/kdi-install2.log"; \
     test -s "/var/lib/keysight/Distributed Infrastructure/version.ini" \
         && echo "KDI post-install wrote its marker:" \
@@ -215,12 +227,12 @@ time.sleep(3600)" & \
     ( cd "/opt/keysight/Distributed Infrastructure" && ./kdi-controller >/tmp/kdi-build.log 2>&1 & ) ; \
     sleep 8; \
     ( cd /opt/keysight/iolibs/coreq_installers && \
-      ./discovery-service-linux-x64-installer.run --mode unattended \
+      timeout 900 ./discovery-service-linux-x64-installer.run --mode unattended \
           --unattendedmodeui minimal --force true --interfaces lan \
-          >/tmp/ds-install.log 2>&1 ) \
+          </dev/null >/tmp/ds-install.log 2>&1 ) \
       || echo "discovery-service install failed; see /tmp/ds-install.log"; \
     pkill -f kdi-controller || true; \
-    kill "$syslog_pid" 2>/dev/null || true; \
+    pkill -f "bind..dev.log" 2>/dev/null || true; \
     rm -f /dev/log; \
     test -x /opt/keysight/iolibs/ds/io-ds \
         && echo "discovery service installed: io-ds" \
