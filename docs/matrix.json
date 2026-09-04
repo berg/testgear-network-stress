@@ -1,5 +1,5 @@
 {
-  "_comment": "Editorial content for the published matrix. Kept out of tools/artifact_matrix.py so a CI run never needs a source edit to say what a run found, and so the findings list can be reviewed as prose rather than as Python.",
+  "_comment": "Editorial content for the published matrix. Kept out of tools/artifact_matrix.py so a CI run never needs a source edit to say how a run is framed, and so the page's words can be reviewed as prose rather than as Python.",
   "title": "VISA Conformance Matrix",
   "lede": "Spec-cited conformance checks over HiSLIP and VXI-11, run from one container against one fault-injecting mock server. Rows where the implementations disagree carry colour. Click any row with a caret for the full failure or skip detail.",
   "protocol_titles": {
@@ -10,81 +10,5 @@
     "NI-VISA": "libvisa 26.5.0",
     "R&S VISA": "librsvisa 5.12.9"
   },
-  "findings": [
-    {
-      "clause": "VPP-4.3 3.2.3",
-      "text": "<code>VI_ATTR_RSRC_SPEC_VERSION</code> is unsupported"
-    },
-    {
-      "clause": "VPP-4.3 3.2.5",
-      "text": "<code>VI_ATTR_MAX_QUEUE_LENGTH</code> is unsupported"
-    },
-    {
-      "clause": "VPP-4.3 3.3.2",
-      "text": "<code>viClose(VI_NULL)</code> answers <code>VI_ERROR_INV_OBJECT</code> rather than <code>VI_WARN_NULL_OBJECT</code>"
-    },
-    {
-      "clause": "VPP-4.3 3.4.2",
-      "text": "a termination character of <code>0x1FF</code> is stored as <code>511</code>; both vendors mask it to a byte"
-    },
-    {
-      "clause": "VPP-4.3 3.6.17",
-      "text": "a 300-character shared-lock key is accepted, where 256 or more is an error"
-    },
-    {
-      "clause": "VPP-4.3 3.6.28",
-      "text": "a nested exclusive lock is not reported; over VXI-11 the session waits out its own timeout against a lock it already holds"
-    },
-    {
-      "clause": "VPP-4.3 3.6.32",
-      "text": "an unlock that leaves a lock still held is not reported"
-    },
-    {
-      "clause": "VPP-4.3 3.7.6",
-      "text": "<code>viEnableEvent(VI_HNDLR)</code> succeeds with no handler installed"
-    },
-    {
-      "clause": "VPP-4.3 3.7.13",
-      "text": "<code>VI_SUSPEND_HNDLR | VI_HNDLR</code> is accepted; the modes are mutually exclusive"
-    },
-    {
-      "clause": "VPP-4.3 4.3.17",
-      "text": "the resource class suffix is matched case-sensitively &mdash; <code>::instr</code> is refused where <code>::INSTR</code> opens"
-    },
-    {
-      "clause": "VPP-4.3 5.1.12",
-      "text": "four required message-based attributes are missing"
-    },
-    {
-      "clause": "VPP-4.3 5.1.17",
-      "text": "<code>VI_ATTR_TCPIP_PORT</code> and <code>VI_ATTR_TCPIP_NODELAY</code> are missing"
-    },
-    {
-      "clause": "VPP-4.3 5.1.72",
-      "text": "required operations raise a Python exception instead of returning a status"
-    },
-    {
-      "clause": "VXI-11 B.6.3",
-      "text": "a <code>maxRecvSize</code> of zero wedges the session &mdash; <code>viWrite</code> never returns"
-    },
-    {
-      "clause": "VPP-4.3 3.2.2",
-      "text": "a stalled connection answers <code>VI_ERROR_IO</code> about 11&nbsp;s late; NI-VISA answers <code>VI_ERROR_TSK_TIMEOUT</code> at 2001&nbsp;ms"
-    }
-  ],
-  "vendor_findings": [
-    {
-      "who": "R&amp;S &middot; VPP-4.3 3.7.21",
-      "text": "<code>viWaitOnEvent</code> does not dequeue an event whose type was disabled after it arrived"
-    },
-    {
-      "who": "R&amp;S &middot; IVI-6.1 2.6",
-      "text": "shared locks over HiSLIP are refused outright with <code>VI_ERROR_INV_PROTOCOL</code>"
-    },
-    {
-      "who": "all three &middot; VPP-4.3 5.1.11",
-      "text": "<code>VI_ATTR_TRIG_ID</code> is required of every INSTR resource and supported by none of them on TCPIP"
-    }
-  ],
   "footer": "Skips are counted and coloured separately from passes throughout. A skipped check reads like a passing one at a glance, and the ones that matter are those that stay skipped run after run &mdash; so every skip carries its reason."
 }

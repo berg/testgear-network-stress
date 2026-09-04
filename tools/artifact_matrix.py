@@ -185,12 +185,6 @@ tr.detail-row td{padding:0 .75rem .9rem;background:var(--rule-soft)}
   margin:0;padding:.6rem .7rem;background:var(--panel);
   border:1px solid var(--rule);border-radius:3px;color:var(--ink);
   white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
-.findings{background:var(--panel);border:1px solid var(--rule);border-radius:3px;
-  padding:1rem 1.15rem}
-.findings table{min-width:34rem;font-size:.82rem}
-.findings td:first-child{font-family:var(--mono);font-size:.74rem;white-space:nowrap;
-  color:var(--muted);vertical-align:top}
-.findings .scroll{border:0;background:transparent}
 code{font-family:var(--mono);font-size:.88em}
 footer{color:var(--muted);font-size:.78rem;border-top:1px solid var(--rule);
   padding-top:1rem;max-width:70ch}
@@ -630,11 +624,11 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
 
 
 def load_prose(path: Path) -> dict:
-    """The page's words: title, lede, findings, footer.
+    """The page's words: title, lede, per-protocol headings, footer.
 
     Out of this file on purpose. A CI run that has just produced a new set of
-    results should not need a source edit to publish them, and a findings list
-    is prose -- it wants reviewing as prose, not as a Python literal.
+    results should not need a source edit to publish them, and a page's
+    framing is prose -- it wants reviewing as prose, not as a Python literal.
     """
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -651,7 +645,7 @@ def main() -> int:
     parser.add_argument(
         "--prose",
         default=str(HERE / "docs" / "matrix.json"),
-        help="JSON holding the page's title, lede and findings",
+        help="JSON holding the page's title, lede and headings",
     )
     parser.add_argument(
         "--source-url",
@@ -702,16 +696,16 @@ def main() -> int:
 
     # The provenance block comes from the first column that actually ran. Taking
     # it from a column that produced nothing would stamp the page with a python
-    # and a commit no result on it came from.
+    # no result on it came from.
+    #
+    # pyvisa and python only: they are properties of the run, true of every
+    # column on the page. The commit under test is not -- it belongs to the one
+    # column built from a checkout, and it sits on that column's card. In the
+    # masthead it read as the page's subject, which is not the framing this
+    # page makes.
     first = sections[0][1]
     ran = [c.get("context") or {} for c in first if aggregate.status(c) == "ok"]
     ctx = ran[0] if ran else {}
-    # The commit, though, comes from a column that has one. The first column
-    # that ran is usually a vendor library, whose context names no pyvisa-py
-    # tree at all -- so the masthead printed "?" for the one field the whole
-    # nightly run exists to pin down. Every column mounts the same checkout, so
-    # any column carrying a commit carries the right one.
-    commit_ctx = next((c for c in ran if c.get("pyvisa-py commit")), {})
     # The eyebrow names the columns, so it has to be generated. It used to be a
     # literal, which meant a fourth implementation could join the matrix and
     # the masthead would still claim there were three.
@@ -723,35 +717,12 @@ def main() -> int:
     w(f'<p class="lede">{esc(prose.get("lede", ""))}</p>')
     w('<div class="spec">'
       f'<span>pyvisa <b>{esc(ctx.get("pyvisa", "?"))}</b></span>'
-      # title= carries the full SHA: the visible text is abbreviated to keep
-      # the masthead a line, but the thing someone needs to paste into
-      # `git show` has to be selectable somewhere on the page.
-      f'<span>pyvisa-py <b title="{esc(commit_ctx.get("pyvisa-py commit", ""))}">'
-      f'{esc(short_sha(commit_ctx.get("pyvisa-py commit", "?")))}</b>'
-      f'{" " + esc(commit_ctx["pyvisa-py described"]) if commit_ctx.get("pyvisa-py described") else ""}'
-      "</span>"
       f'<span>python <b>{esc(ctx.get("python", "?"))}</b></span>'
       "</div>")
     w("</header>")
 
     for protocol, cols in sections:
         render_protocol(protocol, cols, out, prose, args.source_url)
-
-    w('<section class="findings">')
-    w("<h4>Confirmed findings</h4>")
-    w('<p class="lede" style="margin-bottom:.8rem">Written up from the '
-      "per-implementation lists above, with the clause each one cites.</p>")
-    w('<div class="scroll"><table><tbody>')
-    for entry in prose.get("findings", []):
-        w(f"<tr><td>{entry['clause']}</td><td>{entry['text']}</td></tr>")
-    w("</tbody></table></div></section>")
-
-    w('<section class="findings">')
-    w("<h4>Findings elsewhere</h4>")
-    w('<div class="scroll"><table><tbody>')
-    for entry in prose.get("vendor_findings", []):
-        w(f"<tr><td>{entry['who']}</td><td>{entry['text']}</td></tr>")
-    w("</tbody></table></div></section>")
 
     w("""<script>
 (function () {
