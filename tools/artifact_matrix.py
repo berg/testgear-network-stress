@@ -749,10 +749,15 @@ def main() -> int:
   });
 })();
 </script>""")
-    w("<footer>Skips are counted and coloured separately from passes throughout. "
-      "A skipped check reads like a passing one at a glance, and the ones that "
-      "matter are those that stay skipped run after run &mdash; so every skip "
-      "carries its reason.</footer>")
+    # From the prose file, like every other word on the page. The same text was
+    # a literal here *and* a "footer" key nobody read, so editing the file --
+    # the one place the file exists to be edited -- changed nothing.
+    #
+    # Not escaped: these strings carry their own markup, as the lede and the
+    # protocol headings do. The file is part of the repository, not input.
+    footer = prose.get("footer")
+    if footer:
+        w(f"<footer>{footer}</footer>")
     w("</div>")
     if args.full_page:
         w("</body></html>")
