@@ -96,6 +96,14 @@ def main() -> int:
         "before it ran anything -- a vendor library that would not initialise",
     )
     parser.add_argument("--reason", default="")
+    parser.add_argument(
+        "--vendor-version",
+        default="",
+        help="the library this leg installed, as the manifest names it. It "
+        "reaches the page as the column's version; without it the column is "
+        "labelled by implementation and not by build, and two runs a release "
+        "apart are indistinguishable",
+    )
     parser.add_argument("--duration", type=float, default=0.0)
     parser.add_argument(
         "--summary",
@@ -117,6 +125,9 @@ def main() -> int:
         status, reason = args.status, args.reason or reason
     elif args.reason:
         reason = args.reason
+
+    if args.vendor_version:
+        leg["vendor_version"] = args.vendor_version
 
     leg.update(
         status=status,

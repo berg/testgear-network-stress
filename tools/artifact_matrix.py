@@ -72,8 +72,9 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
 .wrap{max-width:76rem;margin:0 auto;padding:2.5rem 1.25rem 5rem;
   display:flex;flex-direction:column;gap:2.5rem}
 .mast{display:flex;flex-direction:column;gap:.5rem}
-.eyebrow{font-family:var(--cond);font-weight:600;font-size:.75rem;
-  letter-spacing:.13em;text-transform:uppercase;color:var(--accent)}
+.lede a{color:inherit;text-decoration-color:var(--accent);
+  text-underline-offset:.18em}
+.lede a:hover{color:var(--accent)}
 h1{font-family:var(--cond);font-weight:700;font-size:clamp(1.7rem,4vw,2.5rem);
   margin:0;line-height:1.1;text-wrap:balance;letter-spacing:-.01em}
 h2.proto{font-family:var(--cond);font-weight:700;font-size:1.4rem;margin:0;
@@ -322,7 +323,6 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
     w = out.append
     matrix = aggregate.build(cols)
     titles = prose.get("protocol_titles", {})
-    versions = prose.get("versions", {})
 
     # A row every implementation skipped is a row about the suite, not about
     # the implementations: usually a feature the transport does not have, so
@@ -353,7 +353,10 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
     ctx = next(
         (c.get("context") for c in cols if aggregate.status(c) == "ok"), {}
     ) or {}
-    w('<section class="proto-block">')
+    # id on the section, so the lede above can link straight to a transport.
+    # The protocol key is the anchor: it is already the stable identifier the
+    # reports are filed under, and it does not move when a heading is reworded.
+    w(f'<section class="proto-block" id="{esc(protocol)}">')
     w(f'<h2 class="proto">{esc(titles.get(protocol, protocol))}</h2>')
     lede = (
         f"{len(matrix.rows)} checks. {len(matrix.disagreements)} differ between "
@@ -412,18 +415,33 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
         n = matrix.counts(i)
         p_, f_, s_ = n.get("PASS", 0), n.get("FAIL", 0), n.get("SKIP", 0)
         total = max(p_ + f_ + s_, 1)
+        # The leg records this from the manifest entry it checksummed, so it
+        # names the build that ran. It used to be a hand-written map in the
+        # prose file, which meant the page kept claiming whichever version
+        # someone last typed there -- and had no entry at all for Keysight,
+        # whose library cannot simply be asked (get_library_paths() answers it
+        # with an empty tuple).
         version = (
             column.get("vendor_version")
-            or versions.get(column["short"])
             or short_sha(column.get("context", {}).get("pyvisa-py commit", ""))
         )
+        # The card's heading is already the implementation's name, and the
+        # manifest spells its versions out in full ("Keysight IO Libraries
+        # 21.3.94") because that string is also read on its own, in a job log.
+        # Under the heading it stutters, so the name comes off here.
+        if version.lower().startswith(column["short"].lower()):
+            version = version[len(column["short"]):].strip() or version
         w(f'<article class="card{"" if st == "ok" else " dead"}">')
         w(f'<h3>{esc(column["short"])}</h3>')
         # Nested quotes in an f-string need 3.12; the vendor container is
         # Ubuntu 22.04 and ships 3.10, so keep the lookup outside.
         why = column.get("reason", "")
         sub = version if st == "ok" else f"{st} \u2014 {why}"
-        w(f'<div class="ver">{esc(sub)}</div>')
+        # Omitted rather than rendered empty. A column whose build nobody
+        # recorded should leave a gap, not an empty line the eye reads as a
+        # version it cannot make out.
+        if sub:
+            w(f'<div class="ver">{esc(sub)}</div>')
         if show_os and column.get("os_label"):
             w(f'<div class="ver os">{esc(column["os_label"])}</div>')
         if column.get("errors"):
@@ -706,15 +724,12 @@ def main() -> int:
     first = sections[0][1]
     ran = [c.get("context") or {} for c in first if aggregate.status(c) == "ok"]
     ctx = ran[0] if ran else {}
-    # The eyebrow names the columns, so it has to be generated. It used to be a
-    # literal, which meant a fourth implementation could join the matrix and
-    # the masthead would still claim there were three.
-    named = " &middot; ".join(esc(n) for n in aggregate.display_labels(first))
     w('<header class="mast">')
-    w(f'<div class="eyebrow">{named}</div>')
     title = prose.get("title", "VISA Conformance Matrix")
     w(f"<h1>{esc(title)}</h1>")
-    w(f'<p class="lede">{esc(prose.get("lede", ""))}</p>')
+    # Unescaped, like the footer: the lede links to the transport sections by
+    # name, and the anchors belong in the prose beside the words they mark up.
+    w(f'<p class="lede">{prose.get("lede", "")}</p>')
     w('<div class="spec">'
       f'<span>pyvisa <b>{esc(ctx.get("pyvisa", "?"))}</b></span>'
       f'<span>python <b>{esc(ctx.get("python", "?"))}</b></span>'

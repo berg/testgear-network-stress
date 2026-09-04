@@ -71,6 +71,16 @@ def main() -> int:
         metavar="PATH",
         help="write the manifest's install block here, for the caller to use",
     )
+    parser.add_argument(
+        "--print-version",
+        metavar="PATH",
+        help="write the manifest's vendor_version here, for the leg to record. "
+        "The page names the library each column was produced by, and this is "
+        "the only place that string exists: the installed library cannot "
+        "always be asked -- Keysight answers get_library_paths() with an empty "
+        "tuple -- and the checksum above has just proved these bytes are the "
+        "ones the manifest names",
+    )
     args = parser.parse_args()
 
     s3 = client()
@@ -118,6 +128,10 @@ def main() -> int:
     if args.print_install:
         Path(args.print_install).write_text(
             json.dumps(entry.get("install", {}), indent=2), encoding="utf-8"
+        )
+    if args.print_version and entry.get("vendor_version"):
+        Path(args.print_version).write_text(
+            entry["vendor_version"], encoding="utf-8"
         )
     return 0
 

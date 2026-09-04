@@ -1,14 +1,10 @@
 {
   "_comment": "Editorial content for the published matrix. Kept out of tools/artifact_matrix.py so a CI run never needs a source edit to say how a run is framed, and so the page's words can be reviewed as prose rather than as Python.",
   "title": "VISA Conformance Matrix",
-  "lede": "Spec-cited conformance checks over HiSLIP and VXI-11, run from one container against one fault-injecting mock server. Rows where the implementations disagree carry colour. Click any row with a caret for the full failure or skip detail.",
+  "lede": "Spec-cited conformance checks over <a href=\"#hislip\">HiSLIP</a> and <a href=\"#vxi11\">VXI-11</a>, run from one container against one fault-injecting mock server. Rows where the implementations disagree carry colour. Click any row with a caret for the full failure or skip detail.",
   "protocol_titles": {
     "hislip": "HiSLIP",
     "vxi11": "VXI-11"
-  },
-  "versions": {
-    "NI-VISA": "libvisa 26.5.0",
-    "R&S VISA": "librsvisa 5.12.9"
   },
   "footer": "Skips are counted and coloured separately from passes throughout. A skipped check reads like a passing one at a glance, and the ones that matter are those that stay skipped run after run &mdash; so every skip carries its reason."
 }

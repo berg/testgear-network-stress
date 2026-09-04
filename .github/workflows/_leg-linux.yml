@@ -132,7 +132,8 @@ jobs:
             --backend "${{ fromJSON(inputs.leg).backend }}" \
             --os linux \
             --bucket "$VENDOR_BUCKET" \
-            --into vendor/
+            --into vendor/ \
+            --print-version vendor-version.txt
           rc=$?
           # 3 is "nobody has provisioned this one yet". That belongs on the
           # page as a column saying so, not as a red job that stops the other
@@ -213,6 +214,13 @@ jobs:
           if [[ "${{ steps.probe.outcome }}" != "success" ]]; then
             extra=(--status unavailable
                    --reason "the backend did not load in the container; see the probe step")
+          fi
+          # Written by the fetch step from the manifest entry whose checksum it
+          # verified, so the column is named for the build that actually ran.
+          # Absent for the pyvisa-py leg, which installs no vendor library, and
+          # for a backend nobody has provisioned yet.
+          if [[ -s vendor-version.txt ]]; then
+            extra+=(--vendor-version "$(cat vendor-version.txt)")
           fi
           python tools/leg_status.py --leg "$LEG" --dir out --out out/leg.json \
             --summary "$GITHUB_STEP_SUMMARY" "${extra[@]}"
