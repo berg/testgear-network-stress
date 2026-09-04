@@ -136,7 +136,15 @@ python3 -c 'import pyvisa; print("pyvisa:", pyvisa.__version__)' 2>&1 | tail -1
 PYVISA_PY_TREE=/pyvisa-py
 if [[ -f "$PYVISA_PY_TREE/pyvisa_py/__init__.py" ]]; then
     export TESTGEAR_PYVISA_PY="$PYVISA_PY_TREE"
-    echo "pyvisa-py: $PYVISA_PY_TREE ($(git -C "$PYVISA_PY_TREE" describe --always --dirty --tags 2>/dev/null || echo 'not a checkout') on $(git -C "$PYVISA_PY_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?'))"
+    # The SHA, in full, and not `git describe`: describe writes the hash as
+    # `g3cc4fe9`, where the leading g is git's own "this is a hash" marker and
+    # not part of the hash, and it omits the hash entirely when HEAD is on a
+    # tag. This line is what someone reads out of a log to check out the tree
+    # the run used, so it has to be pasteable.
+    pp_sha=$(git -C "$PYVISA_PY_TREE" rev-parse HEAD 2>/dev/null || echo 'not a checkout')
+    pp_branch=$(git -C "$PYVISA_PY_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
+    [[ -n "$(git -C "$PYVISA_PY_TREE" status --porcelain 2>/dev/null)" ]] && pp_sha="$pp_sha-dirty"
+    echo "pyvisa-py: $PYVISA_PY_TREE ($pp_sha on $pp_branch)"
 else
     echo "pyvisa-py: NOT MOUNTED at $PYVISA_PY_TREE"
     echo "  Mount the checkout under test:"

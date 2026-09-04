@@ -290,9 +290,9 @@ def provenance(resolved: Resolved) -> dict[str, str]:
             # stamped at install time and does not follow a tree put on
             # sys.path afterwards. Reporting it unqualified next to a
             # different checkout is how a run gets attributed to the wrong
-            # commit; the git describe below is the authoritative line.
+            # commit; the SHA from _git_commit below is the authoritative line.
             info["pyvisa-py path"] = str(path)
-            info["pyvisa-py commit"] = _git_describe(path.parent)
+            info.update(_git_commit(path.parent))
             info["pyvisa-py version"] = (
                 f"{pyvisa_py.__version__} (installed metadata, "
                 f"not necessarily this tree)"
@@ -302,28 +302,56 @@ def provenance(resolved: Resolved) -> dict[str, str]:
     return info
 
 
-def _git_describe(tree: Path) -> str:
-    """`git describe` for a checkout, or a note saying why not."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(tree), "describe", "--always", "--dirty", "--tags"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"(git failed: {exc})"
-    if out.returncode != 0:
-        return "(not a git checkout)"
+def _git_commit(tree: Path) -> dict[str, str]:
+    """Name the checkout: the commit SHA first, tag context second.
 
-    described = out.stdout.strip()
-    branch = subprocess.run(
-        ["git", "-C", str(tree), "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    ).stdout.strip()
-    return f"{described} on {branch}" if branch else described
+    This used to report `git describe` verbatim, which reads as
+    ``0.8.1-79-g3cc4fe9`` -- and the SHA in that string is ``3cc4fe9``, not
+    ``g3cc4fe9``: the ``g`` is a prefix git adds to say "this is a git hash",
+    so pasting the string into `git show` fails. Worse, describe prints *no*
+    SHA at all when HEAD sits exactly on a tag, so on a release day the report
+    named no commit. The SHA is what makes a result reproducible, so it is
+    reported on its own, in full, from rev-parse; the tag is context beside it.
+    """
+    def git(*args: str) -> tuple[int, str]:
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(tree), *args],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return 1, f"(git failed: {exc})"
+        return out.returncode, out.stdout.strip()
+
+    rc, sha = git("rev-parse", "HEAD")
+    if rc != 0:
+        return {"pyvisa-py commit": sha if sha.startswith("(") else "(not a git checkout)"}
+
+    # A tree with uncommitted edits is not the commit it claims to be, and the
+    # SHA alone would say it was. `describe --dirty` only marks it; ask
+    # directly, so the flag survives even when there is no tag to describe.
+    rc, changes = git("status", "--porcelain")
+    dirty = rc == 0 and bool(changes)
+
+    info = {"pyvisa-py commit": f"{sha}-dirty" if dirty else sha}
+
+    rc, branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    where = branch if rc == 0 and branch and branch != "HEAD" else "a detached HEAD"
+
+    # --tags so lightweight tags count, and no --always: a tagless tree should
+    # say it has no tag, not repeat the SHA in a second field.
+    rc, described = git("describe", "--tags", "--abbrev=0")
+    if rc == 0 and described:
+        rc, count = git("rev-list", "--count", f"{described}..HEAD")
+        ahead = f", +{count} commit{'' if count == '1' else 's'}" if rc == 0 and count != "0" else ""
+        info["pyvisa-py described"] = f"{described}{ahead}, on {where}"
+    else:
+        info["pyvisa-py described"] = f"no tag reachable, on {where}"
+    if dirty:
+        info["pyvisa-py described"] += " (uncommitted changes)"
+    return info
 
 
 def describe_environment(resolved: Resolved) -> str:

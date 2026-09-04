@@ -215,6 +215,19 @@ def esc(value) -> str:
     return html.escape(str(value))
 
 
+def short_sha(commit: str) -> str:
+    """A commit for a narrow slot: 12 hex characters, dirty marker kept.
+
+    The full SHA stays in the title attribute, because the abbreviation is for
+    reading and the full one is for pasting into `git show`.
+    """
+    commit = str(commit or "")
+    head, _, rest = commit.partition("-")
+    if len(head) == 40 and all(c in "0123456789abcdef" for c in head):
+        return f"{head[:12]}-{rest}" if rest else head[:12]
+    return commit
+
+
 def reason(result: dict) -> str:
     """The full text behind a non-passing result, kept verbatim.
 
@@ -408,7 +421,7 @@ def render_protocol(protocol: str, cols, out, prose: dict, source_url: str = "")
         version = (
             column.get("vendor_version")
             or versions.get(column["short"])
-            or column.get("context", {}).get("pyvisa-py commit", "")
+            or short_sha(column.get("context", {}).get("pyvisa-py commit", ""))
         )
         w(f'<article class="card{"" if st == "ok" else " dead"}">')
         w(f'<h3>{esc(column["short"])}</h3>')
@@ -691,9 +704,14 @@ def main() -> int:
     # it from a column that produced nothing would stamp the page with a python
     # and a commit no result on it came from.
     first = sections[0][1]
-    ctx = next(
-        (c.get("context") for c in first if aggregate.status(c) == "ok"), {}
-    ) or {}
+    ran = [c.get("context") or {} for c in first if aggregate.status(c) == "ok"]
+    ctx = ran[0] if ran else {}
+    # The commit, though, comes from a column that has one. The first column
+    # that ran is usually a vendor library, whose context names no pyvisa-py
+    # tree at all -- so the masthead printed "?" for the one field the whole
+    # nightly run exists to pin down. Every column mounts the same checkout, so
+    # any column carrying a commit carries the right one.
+    commit_ctx = next((c for c in ran if c.get("pyvisa-py commit")), {})
     # The eyebrow names the columns, so it has to be generated. It used to be a
     # literal, which meant a fourth implementation could join the matrix and
     # the masthead would still claim there were three.
@@ -705,7 +723,13 @@ def main() -> int:
     w(f'<p class="lede">{esc(prose.get("lede", ""))}</p>')
     w('<div class="spec">'
       f'<span>pyvisa <b>{esc(ctx.get("pyvisa", "?"))}</b></span>'
-      f'<span>pyvisa-py <b>{esc(ctx.get("pyvisa-py commit", "?"))}</b></span>'
+      # title= carries the full SHA: the visible text is abbreviated to keep
+      # the masthead a line, but the thing someone needs to paste into
+      # `git show` has to be selectable somewhere on the page.
+      f'<span>pyvisa-py <b title="{esc(commit_ctx.get("pyvisa-py commit", ""))}">'
+      f'{esc(short_sha(commit_ctx.get("pyvisa-py commit", "?")))}</b>'
+      f'{" " + esc(commit_ctx["pyvisa-py described"]) if commit_ctx.get("pyvisa-py described") else ""}'
+      "</span>"
       f'<span>python <b>{esc(ctx.get("python", "?"))}</b></span>'
       "</div>")
     w("</header>")

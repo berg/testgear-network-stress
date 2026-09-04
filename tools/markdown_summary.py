@@ -64,12 +64,22 @@ def main() -> int:
         if not columns:
             continue
         matrix = aggregate.build(columns)
+        ran = [c.get("context") or {} for c in columns
+               if aggregate.status(c) == "ok"]
         if not provenance:
-            provenance = next(
-                (c.get("context", {}) for c in columns
-                 if aggregate.status(c) == "ok"),
-                {},
-            )
+            provenance = dict(ran[0]) if ran else {}
+        # The pyvisa-py keys come from whichever column has them. The first
+        # column that ran is usually a vendor library, whose context names no
+        # pyvisa-py tree, and the commit under test is the one line of this
+        # block nobody can reconstruct afterwards. Every column mounts the same
+        # checkout, so any column carrying a commit carries the right one.
+        if not provenance.get("pyvisa-py commit"):
+            for ctx in ran:
+                if ctx.get("pyvisa-py commit"):
+                    provenance.update(
+                        {k: v for k, v in ctx.items() if k.startswith("pyvisa-py ")}
+                    )
+                    break
         parts.append(
             aggregate.render_markdown(matrix, protocol, max_rows=args.max_rows)
         )
@@ -79,9 +89,10 @@ def main() -> int:
             "## What was tested",
             "",
             *[
-                f"- **{k}** &mdash; {v}"
-                for k, v in provenance.items()
-                if k in ("pyvisa", "pyvisa-py commit", "python", "platform")
+                f"- **{k}** &mdash; {provenance[k]}"
+                for k in ("pyvisa", "pyvisa-py commit", "pyvisa-py described",
+                          "python", "platform")
+                if provenance.get(k)
             ],
             "",
         ]

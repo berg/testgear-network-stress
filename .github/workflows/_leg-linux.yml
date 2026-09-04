@@ -100,10 +100,14 @@ jobs:
           git clone --filter=blob:none \
             "https://github.com/${{ inputs.pyvisa-py-repo }}" pyvisa-py
           # Not --detach: for a branch this keeps the name, and the provenance
-          # block reports "0.8.1-79-g3cc4fe9 on main" rather than "on HEAD".
-          # A SHA detaches on its own anyway.
+          # block reports "on main" rather than "on a detached HEAD". A SHA
+          # detaches on its own anyway.
           git -C pyvisa-py checkout "${{ inputs.pyvisa-py-ref }}"
-          git -C pyvisa-py --no-pager log -1 --oneline
+          # The full SHA, so the log says exactly what to check out to
+          # reproduce this leg. It is also what the report's provenance block
+          # carries, so the two can be compared without decoding anything.
+          echo "pyvisa-py commit: $(git -C pyvisa-py rev-parse HEAD)"
+          git -C pyvisa-py --no-pager log -1 --format="%h %s"
 
       # -- the vendor installer, for the legs that need one -----------------
       # Only when the store has actually been provisioned. Between merging
