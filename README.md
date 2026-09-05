@@ -86,6 +86,20 @@ The second form compares two checkouts of pyvisa-py instead of two VISA
 libraries, which answers "did my branch change anything?" -- against upstream
 `main` this branch currently comes out ahead on six checks.
 
+The same question across two runs made at different times is
+`tools/outcomes.py`. It reduces a run to one sorted line per check -- outcome
+and name, none of the measurements -- so two runs diff with plain `diff`, and
+`--against` names each change for what it is:
+
+```bash
+./run_all.sh --pyvisa-py ~/code/pyvisa-py            # REPORTS=after
+./.venv/bin/python tools/outcomes.py after --against before
+```
+
+It reads whatever a run left behind: `run_all` per-script reports, a
+`compare.py --json` file, or a CI run's `site/columns`. Every CI run also ships
+`site/outcomes.txt` in its site artifact, which is the same dump ready to diff.
+
 ### Running the vendor implementations in containers
 
 NI and R&S ship x86-64 Linux binaries only, so they run on a Linux host rather
@@ -151,6 +165,7 @@ glance a skipped check reads like a passing one.
 | `reproducers/` | One runnable script per open finding, and the original bench diagnostics under `bench/`. |
 | `docs/findings.md` | What this suite has found, and what looked like a finding and was not. |
 | `run_all.py`, `compare.py` | The suite runner and the cross-backend matrix. `run_all.sh` is a shim over the first; both take their script list from `testgear/suite.py`. |
+| `tools/outcomes.py` | A run as one sorted line per check, for diffing two runs; `--against` names what changed. |
 | `.github/workflows/` | The same runs in CI, one Linux job per implementation, published to Pages. See [`docs/ci.md`](docs/ci.md). |
 
 ## Writing a check

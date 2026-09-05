@@ -146,7 +146,9 @@ belongs. Turning it into a red build on a pull request to *this* repository
 made the build about how this project was doing rather than about the
 libraries, and nobody could make it green by fixing this project. Whether
 pyvisa-py got better or worse between two commits is a difference between two
-runs of the page.
+runs, and every run's site artifact carries `outcomes.txt` for exactly that:
+one sorted line per check, no measurements. `tools/outcomes.py after
+--against before` on two of them names each change.
 
 ## Columns that did not run
 
