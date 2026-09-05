@@ -19,14 +19,15 @@ both runs agree on what X is called.
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
+import itertools
 import json
 import pathlib
 import sys
 import threading
 import time
 import traceback
+import types
 from typing import Callable, Iterable
 
 PASS = "PASS"
@@ -103,38 +104,40 @@ class Result:
         return data
 
 
-def check(name: str, rule: str = "", protocols: Iterable[str] = ("vxi11", "hislip")):
+def check(
+    name: str,
+    rule: str = "",
+    protocols: Iterable[str] = ("vxi11", "hislip"),
+    watchdog: float | None = None,
+):
     """Register a function as a named check.
 
     `rule` names the clause the check enforces, so a failure message can cite
     it. `protocols` limits a check to the transports it makes sense for.
+
+    `watchdog` overrides the file's timeout for this check alone. The default
+    suits a check that makes a handful of calls, and some do not: reading a
+    3 kB response one byte at a time is 3201 round trips, which is under a
+    second over HiSLIP and fifty over VXI-11. A check that legitimately takes
+    longer than the file's timeout must say so here, because the alternative
+    is raising the timeout for every check in the file -- and the timeout is
+    what stops a genuine hang from costing an overnight run.
+
+    `watchdog=0` turns it off for this check. That is for a check whose length
+    the caller chooses -- the soak runs for as long as `--duration` says -- and
+    it is a real cost: a hang inside it hangs the run, which is exactly what
+    the watchdog exists to prevent. Reach for it only when no constant could
+    be right.
     """
 
     def wrap(func: Callable) -> Callable:
         func._check_name = name
         func._check_rule = rule
         func._check_protocols = tuple(protocols)
+        func._check_watchdog = watchdog
         return func
 
     return wrap
-
-
-class _Attempt:
-    """Whether the block inside `Stats.attempt` got through.
-
-    `detail` is what the block observed, for the row's expando. It starts as
-    whatever the caller passed to `attempt` and the block may replace it with
-    something it only learns by running.
-    """
-
-    __slots__ = ("ok", "detail")
-
-    def __init__(self, detail: str = "") -> None:
-        self.ok = False
-        self.detail = detail
-
-    def __bool__(self) -> bool:
-        return self.ok
 
 
 class Stats:
@@ -244,50 +247,6 @@ class Stats:
             if exc is not None and self.verbose:
                 traceback.print_exc()
 
-    @contextlib.contextmanager
-    def attempt(self, message: str, rule: str = "", detail: str = ""):
-        """A call in setup whose failure is a FAIL, not a crashed script.
-
-        `run_checks` already turns any exception into a FAIL, so a registered
-        check that breaks costs one row. The imperative setup between checks
-        had no such net: a library that raised where it should have returned a
-        status took the whole script with it, and the thirty checks after it
-        vanished from the column -- which reads as "not applicable" rather than
-        "this run crashed". That is the failure 973ed45 and 6581660 were both
-        about, arriving through a third door.
-
-        Yields a flag that is true when the block succeeded, so the caller can
-        skip the part that depended on it:
-
-            with stats.attempt("SRQ events can be enabled", rule="...",
-                               detail="viEnableEvent(VI_QUEUE)") as ok:
-                inst.enable_event(visa.SRQ, visa.QUEUE)
-            if ok:
-                ...
-        """
-        # Imported here, not at module scope: testgear.visa imports this
-        # module, so the dependency only closes at call time.
-        from testgear import visa as _visa
-
-        # The block the caller wrote, not the line below that records it.
-        where = _caller(3)
-        outcome = _Attempt(detail)
-        try:
-            yield outcome
-        except Skip as exc:
-            self.skip(message, str(exc), source=where)
-        except _visa.BadCall:
-            # This suite calling VISA wrongly is not a finding about the
-            # backend, and must not be recorded as one. Let it out to exit 5.
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self.error(message, exc, detail=outcome.detail, rule=rule, source=where)
-        else:
-            outcome.ok = True
-            self.check(
-                True, message, rule=rule, detail=outcome.detail, source=where
-            )
-
     def skip(self, message: str, reason: str = "", source: str = "") -> None:
         """Record a check that did not run, and why.
 
@@ -301,27 +260,6 @@ class Stats:
                 Result(message, SKIP, detail=reason or message, source=source)
             )
             print(f"  SKIP {message}" + (f": {reason}" if reason else ""))
-
-    def skip_each(
-        self, names: Iterable[str], reason: str, source: str = ""
-    ) -> None:
-        """Skip several checks at once, under the names they would have had.
-
-        For a section that decides up front it cannot run -- viTerminate is
-        unimplemented, the remote/local oracle has no signal to read. The
-        temptation is to say so once, under a name of the bail-out's own
-        ("viTerminate is implemented"), and that is what produces the dashes
-        on the published page: the column that bailed gets a row nobody else
-        has, and the columns that ran get rows it does not, so one check
-        becomes two rows and both are mostly blank. A blank cell reads as "not
-        applicable"; a skip reads as "could not run, and here is why".
-
-        `clear_status` in checks/07_clear.py already argues this at length for
-        the failure case. This is the same argument for the skip case.
-        """
-        source = source or _caller()
-        for name in names:
-            self.skip(name, reason, source=source)
 
     def note(self, message: str) -> None:
         with self._lock:
@@ -438,9 +376,17 @@ def run_checks(
                 path = pathlib.Path(path.name)
             source = f"{path.as_posix()}:{code.co_firstlineno}"
         started = time.time()
+        # A check may set its own timeout; see `check(watchdog=...)`. `None`
+        # means it did not ask and the file's applies; `0` means it asked for
+        # none at all, which is what a check whose duration the caller chooses
+        # needs -- the soak runs for `--duration` seconds by design, and no
+        # constant here could be right for both `--duration 60` and an
+        # overnight one.
+        own = getattr(func, "_check_watchdog", None)
+        timeout = watchdog if own is None else own
         try:
-            if watchdog:
-                detail = _with_watchdog(func, watchdog, *args, **kwargs) or ""
+            if timeout:
+                detail = _with_watchdog(func, timeout, *args, **kwargs) or ""
             else:
                 detail = func(*args, **kwargs) or ""
             elapsed = time.time() - started
@@ -502,6 +448,75 @@ def run_checks(
     return stats
 
 
+def registrar(namespace: dict, anchor: int | None = None) -> Callable:
+    """A function that registers generated checks into `namespace`.
+
+        def _register_chunk_checks() -> None:
+            add = harness.registrar(globals())
+            for chunk in (1, 7, 64, 997):
+                add(_intact(chunk), f"a large message read {chunk}B at a time is intact")
+
+    Two things it takes care of, both of which were got wrong by hand first.
+    Each check needs a distinct name in `namespace`, because that is the only
+    way `collect` finds it -- keying them on anything that can repeat silently
+    drops every collision. And each needs `_check_order`, because a check
+    built by a factory has the factory's line number, so a whole family lands
+    on one line and the order inside it is whatever `vars()` happens to yield.
+
+    `anchor` is where the family sits among the hand-written checks, and
+    defaults to the line calling this. Position within the family is the order
+    the registrations happen in.
+    """
+    if anchor is None:
+        anchor = sys._getframe(1).f_lineno
+    counter = itertools.count()
+
+    def add(func, name, *, rule="", protocols=("vxi11", "hislip"), watchdog=None):
+        index = next(counter)
+        # A fresh function object per registration, because `check` records
+        # the name and the protocols *on the function*. Registering one
+        # function twice -- which is exactly what a check whose name differs
+        # per transport wants to do -- had the second registration overwrite
+        # the first, so one transport lost the row and the other got it twice.
+        #
+        # Cloned rather than wrapped: the clone keeps the original `__code__`,
+        # so the source location a failing row links to is still the check
+        # that was written and not this line.
+        clone = types.FunctionType(
+            func.__code__,
+            func.__globals__,
+            func.__name__,
+            func.__defaults__,
+            func.__closure__,
+        )
+        clone.__doc__ = func.__doc__
+        clone.__dict__.update(func.__dict__)
+        registered = check(
+            name, rule=rule, protocols=protocols, watchdog=watchdog
+        )(clone)
+        registered._check_order = (anchor, index)
+        namespace[f"_check_generated_{anchor}_{index}"] = registered
+        return registered
+
+    return add
+
+
+def order_of(func) -> tuple[int, int]:
+    """Where a check sorts among its neighbours.
+
+    Normally its own line, which is what "definition order" means. A check
+    built by a factory has the *factory's* line instead, and a family of them
+    all have the same one -- so a file that generates one check per REN mode
+    gets every mode from one factory grouped together, and the interleaving
+    the enum actually has is lost. Setting `_check_order` to `(anchor, index)`
+    says where the family sits and how it is ordered inside itself.
+    """
+    explicit = getattr(func, "_check_order", None)
+    if explicit is not None:
+        return explicit
+    return (func.__code__.co_firstlineno, 0)
+
+
 def collect(module, protocol: str | None = None) -> list[Callable]:
     """Every registered check in `module`, in definition order.
 
@@ -514,7 +529,7 @@ def collect(module, protocol: str | None = None) -> list[Callable]:
         for obj in vars(module).values()
         if callable(obj) and hasattr(obj, "_check_name")
     ]
-    found.sort(key=lambda f: f.__code__.co_firstlineno)
+    found.sort(key=order_of)
     if protocol is not None:
         found = [f for f in found if protocol in f._check_protocols]
     return found

@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pyvisa import constants, errors  # noqa: E402
 
-from testgear import cli, harness, visa  # noqa: E402
+from testgear import script, visa  # noqa: E402
 from testgear.harness import Skip, check  # noqa: E402
 
 #: Filled in by main() so the checks can reach the target without threading
@@ -485,30 +485,5 @@ def check_observed_traffic():
         return f"the instrument saw writes {writes} and {reads} read"
 
 
-def main() -> int:
-    parser = cli.build_parser(__doc__.splitlines()[0])
-    args = parser.parse_args()
-
-    with cli.open_target(args) as (backend, resource, srv):
-        CTX.update(
-            backend=backend,
-            resource=resource,
-            server=srv,
-            timeout=args.timeout,
-            protocol=args.protocol,
-        )
-        stats = harness.Stats(
-            f"conformance ({args.protocol})",
-            verbose=args.verbose,
-            context=cli.context(args, backend, resource),
-        )
-        checks = harness.collect(sys.modules[__name__], protocol=args.protocol)
-        harness.run_checks(
-            checks, stats, watchdog=30.0, on_timeout=restart_server
-        )
-        stats.write_outputs(args)
-        return stats.finish()
-
-
 if __name__ == "__main__":
-    harness.main(main)
+    script.run(on_timeout=restart_server)

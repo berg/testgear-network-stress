@@ -122,14 +122,21 @@ turned an exception inside a registered check into a FAIL, but the imperative
 setup *between* checks had no such net: a library that raised where the spec
 says it returns a status took the whole script with it, and every check after
 it vanished from the column — which reads as "not applicable" rather than as a
-failure. `Stats.attempt` is that net, and the three scripts that were aborting
-against upstream pyvisa-py main now record the raise as a FAIL, cite the clause
-it breaks, and carry on. One of those crashes turned out to be concealing four
-further failures behind it.
+failure. `Stats.attempt` used to be that net, and the three scripts that were
+aborting against upstream pyvisa-py main recorded the raise as a FAIL, cited
+the clause it breaks, and carried on. One of those crashes turned out to be
+concealing four further failures behind it.
 
-So exit 2 now means what it says: something broke that no check was watching.
-If a new one appears, the fix is usually to put the offending call inside an
-`attempt` and give it a clause, not to catch it more broadly.
+There is no imperative setup between checks any more. Every script is a set of
+registered `@check` functions run by `run_checks`, so the net covers all of
+them by construction and `Stats.attempt` has been removed along with the shape
+it existed to protect. What a script does before its first check lives in a
+`SETUP` context manager, and a raise there is a setup failure rather than a
+finding.
+
+So exit 2 means what it says: something broke that no check was watching. If a
+new one appears, the fix is usually to move the offending call inside a check
+and give it a clause, not to catch it more broadly.
 
 Plus a regression against `docs/ci-baseline.json`: a check the baseline records
 as passing that now fails **or now skips**. A new skip counts, deliberately —

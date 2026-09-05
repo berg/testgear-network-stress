@@ -20,6 +20,7 @@ are checked for the remote/local half of their meaning only, and flagged.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import time
 from pathlib import Path
@@ -29,7 +30,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pyvisa import constants  # noqa: E402
 from pyvisa.constants import StatusCode  # noqa: E402
 
-from testgear import cli, harness, visa  # noqa: E402
+from testgear import harness, script, visa  # noqa: E402
+from testgear.harness import Skip, check  # noqa: E402
+
+CTX: dict = {}
+STATE: dict = {}
 
 REMOTE, LOCAL = "remote", "local"
 
@@ -63,30 +68,20 @@ LOCKOUT_ONLY = {
     constants.RENLineOperation.asrt_address_llo,
 }
 
-
-def state_check_name(mode) -> str:
-    """The name the state check for `mode` is recorded under.
-
-    Used by the check itself and by the skip that stands in for it when the
-    throughput oracle has no signal to read, so the two cannot drift into two
-    half-blank rows.
-    """
-    note = (
-        " (local lockout itself is not observable)" if mode in LOCKOUT_ONLY else ""
-    )
-    return f"{mode.name} leaves the instrument {EXPECTED_STATE[mode]}{note}"
-
-
-def query_rate(inst, count: int) -> float:
-    """Queries per second, the proxy for remote/local state."""
-    start = time.time()
-    for _ in range(count):
-        inst.query("*IDN?")
-    return count / max(time.time() - start, 1e-6)
+#: VXI-11 carries only the addressed operations (B.6.13, B.6.14); the
+#: unaddressed ones are legitimately refused there, so the matrix is restricted
+#: to what the transport can express.
+VXI11_MODES = frozenset(
+    {
+        constants.RENLineOperation.asrt_address,
+        constants.RENLineOperation.asrt_address_llo,
+        constants.RENLineOperation.address_gtl,
+        constants.RENLineOperation.deassert_gtl,
+    }
+)
 
 
-def main() -> int:
-    parser = cli.build_parser(__doc__.splitlines()[0])
+def add_arguments(parser) -> None:
     parser.add_argument(
         "--samples", type=int, default=6, help="queries per throughput measurement"
     )
@@ -104,194 +99,241 @@ def main() -> int:
         help="how much faster remote must be than local for the throughput "
         "oracle to be trusted (default: %(default)s)",
     )
-    args = parser.parse_args()
 
-    with cli.open_target(args) as (backend, resource, srv):
-        stats = harness.Stats(
-            f"remote/local ({args.protocol})",
-            verbose=args.verbose,
-            context=cli.context(args, backend, resource),
+
+def protocols_for(mode) -> tuple[str, ...]:
+    """Which transports can express `mode` at all."""
+    return ("vxi11", "hislip") if mode in VXI11_MODES else ("hislip",)
+
+
+def state_check_name(mode) -> str:
+    """The name the state check for `mode` is recorded under."""
+    note = (
+        " (local lockout itself is not observable)" if mode in LOCKOUT_ONLY else ""
+    )
+    return f"{mode.name} leaves the instrument {EXPECTED_STATE[mode]}{note}"
+
+
+def set_ren(mode) -> StatusCode:
+    """Change the state, then let it settle before anyone measures.
+
+    The settle is not padding. A remote/local change is a bus operation whose
+    effect the instrument applies in its own time, and the oracle here is a
+    throughput measurement that starts immediately afterwards -- so without it
+    the first sample can straddle the transition and land on the wrong side of
+    the threshold. That produced roughly one spurious failure in eight runs,
+    which is the worst kind: frequent enough to erode trust in the suite, rare
+    enough to look like a real intermittent bug.
+    """
+    lib, sess = CTX["session"].visalib, CTX["session"].session
+    st = visa.status(lib.gpib_control_ren, sess, mode)
+    time.sleep(CTX["args"].settle)
+    return st
+
+
+def query_rate(count: int | None = None) -> float:
+    """Queries per second, the proxy for remote/local state."""
+    count = count or CTX["args"].samples
+    inst = CTX["session"]
+    start = time.time()
+    for _ in range(count):
+        inst.query("*IDN?")
+    return count / max(time.time() - start, 1e-6)
+
+
+@contextlib.contextmanager
+def SETUP(ctx):
+    with visa.session(
+        ctx["backend"], ctx["resource"], timeout=ctx["timeout"]
+    ) as session:
+        ctx["session"] = session
+        session.query("*IDN?")
+        visa.drain_errors(session)
+        try:
+            yield
+        finally:
+            visa.check_errors(session, ctx["stats"], "at end of run")
+
+
+# -- 1. every code the transport carries is at least accepted ----------------
+def _ren_accepted(mode):
+    def run():
+        st = set_ren(mode)
+        assert st == StatusCode.success, f"got {st!r}"
+        return f"got {st!r}"
+
+    return run
+
+
+def _ren_refused(mode):
+    def run():
+        """Every implementation refuses these -- VXI-11 has no RPC for driving
+        REN without addressing -- but they disagree about how to say so:
+        pyvisa-py answers VI_ERROR_NSUP_OPER, NI and R&S both answer
+        VI_ERROR_INVALID_MODE. Both are defensible refusals, so the check is
+        that it *is* refused."""
+        st = set_ren(mode)
+        assert st in (
+            StatusCode.error_nonsupported_operation,
+            StatusCode.error_invalid_mode,
+        ), f"got {st!r}"
+        return f"got {st!r}"
+
+    return run
+
+
+def _register_acceptance_checks() -> None:
+    add = harness.registrar(globals())
+    for mode in constants.RENLineOperation:
+        add(
+            _ren_accepted(mode),
+            f"REN {mode.name} is accepted",
+            protocols=protocols_for(mode),
         )
-        with visa.session(backend, resource, timeout=args.timeout) as inst:
-            lib, sess = inst.visalib, inst.session
-
-            def set_ren(mode) -> StatusCode:
-                """Change the state, then let it settle before anyone measures.
-
-                The settle is not padding. A remote/local change is a bus
-                operation whose effect the instrument applies in its own time,
-                and the oracle here is a throughput measurement that starts
-                immediately afterwards -- so without it the first sample can
-                straddle the transition and land on the wrong side of the
-                threshold. That produced roughly one spurious failure in eight
-                runs, which is the worst kind: frequent enough to erode trust
-                in the suite, rare enough to look like a real intermittent bug.
-                """
-                st = visa.status(lib.gpib_control_ren, sess, mode)
-                time.sleep(args.settle)
-                return st
-
-            inst.query("*IDN?")
-            visa.drain_errors(inst)
-
-            # VXI-11 carries only the addressed operations (B.6.13, B.6.14);
-            # the unaddressed ones are legitimately refused there, so the
-            # matrix is restricted to what the transport can express.
-            if args.protocol == "vxi11":
-                supported = {
-                    constants.RENLineOperation.asrt_address,
-                    constants.RENLineOperation.asrt_address_llo,
-                    constants.RENLineOperation.address_gtl,
-                    constants.RENLineOperation.deassert_gtl,
-                }
-            else:
-                supported = set(constants.RENLineOperation)
-
-            # -- 1. every code the transport carries is at least accepted ----
-            for mode in constants.RENLineOperation:
-                st = set_ren(mode)
-                if mode in supported:
-                    stats.check(
-                        st == StatusCode.success,
-                        f"REN {mode.name} is accepted",
-                        detail=f"got {st!r}",
-                    )
-                else:
-                    # Every implementation refuses these -- VXI-11 has no
-                    # RPC for driving REN without addressing -- but they
-                    # disagree about how to say so: pyvisa-py answers
-                    # VI_ERROR_NSUP_OPER, NI and R&S both answer
-                    # VI_ERROR_INVALID_MODE. Both are defensible refusals, so
-                    # the check is that it *is* refused.
-                    stats.check(
-                        st in (
-                            StatusCode.error_nonsupported_operation,
-                            StatusCode.error_invalid_mode,
-                        ),
-                        f"REN {mode.name} is refused over VXI-11",
-                        detail=f"got {st!r}",
-                    )
-
-            # -- 2. calibrate the oracle -------------------------------------
-            set_ren(constants.RENLineOperation.asrt_address)
-            remote_rate = query_rate(inst, args.samples)
-            set_ren(
-                constants.RENLineOperation.deassert
-                if constants.RENLineOperation.deassert in supported
-                else constants.RENLineOperation.deassert_gtl
-            )
-            local_rate = query_rate(inst, args.samples)
-            set_ren(constants.RENLineOperation.asrt_address)
-
-            ratio = remote_rate / max(local_rate, 1e-6)
-            stats.note(
-                f"throughput remote {remote_rate:.0f}/s vs local "
-                f"{local_rate:.0f}/s ({ratio:.1f}x)"
+        if mode not in VXI11_MODES:
+            add(
+                _ren_refused(mode),
+                f"REN {mode.name} is refused over VXI-11",
+                protocols=("vxi11",),
             )
 
-            if ratio < args.ratio:
-                stats.skip_each(
-                    [state_check_name(m) for m in EXPECTED_STATE if m in supported]
-                    + [f"{m.name} is accepted" for m in NOT_OBSERVABLE if m in supported]
-                    + [
-                        "repeated remote/local round trips all succeed",
-                        "the session ends in remote",
-                    ],
-                    "this instrument shows no usable throughput difference, so "
-                    "the state cannot be read back from here. A native HiSLIP "
-                    "instrument has no REN line and lands here",
-                )
-                visa.check_errors(inst, stats, "at end of run")
-                stats.write_outputs(args)
-                return stats.finish()
 
-            # Anything above the geometric mean of the two is remote.
-            threshold = (remote_rate * local_rate) ** 0.5
+_register_acceptance_checks()
 
-            def observed_state() -> str:
-                """Best of three, because this oracle is a timing measurement.
 
-                A single sample sitting near the threshold flips on unrelated
-                load -- another process, a GC pause -- and produces a failure
-                that does not reproduce, which is worse than no check at all.
-                Three samples and a majority make it stable without hiding a
-                state that genuinely did not change: a code that does nothing
-                loses all three.
-                """
-                votes = [
-                    REMOTE if query_rate(inst, args.samples) > threshold else LOCAL
-                    for _ in range(3)
-                ]
-                return max(set(votes), key=votes.count)
+# -- 2. calibrate the oracle -------------------------------------------------
+def threshold() -> float:
+    """Measure remote and local throughput once, and return the dividing line.
 
-            # -- 3. does each code do what it says? ---------------------------
-            for mode, expected in EXPECTED_STATE.items():
-                if mode not in supported:
-                    continue
-                # Start from the opposite state, so a code that does nothing at
-                # all is caught rather than passing on the state its
-                # predecessor left behind.
-                opposite = (
-                    constants.RENLineOperation.deassert_gtl
-                    if expected == REMOTE
-                    else constants.RENLineOperation.asrt_address
-                )
-                set_ren(opposite)
-                before = observed_state()
+    Everything below this point depends on the measurement, so it happens on
+    the first check that needs it and the rest read what it found. An
+    instrument with no usable difference skips them all, under their own
+    names -- a native HiSLIP instrument has no REN line and lands there.
+    """
+    if "threshold" not in STATE:
+        args, stats = CTX["args"], CTX["stats"]
+        set_ren(constants.RENLineOperation.asrt_address)
+        remote_rate = query_rate()
+        set_ren(
+            constants.RENLineOperation.deassert
+            if constants.RENLineOperation.deassert not in VXI11_MODES
+            and CTX["protocol"] == "hislip"
+            else constants.RENLineOperation.deassert_gtl
+        )
+        local_rate = query_rate()
+        set_ren(constants.RENLineOperation.asrt_address)
+        ratio = remote_rate / max(local_rate, 1e-6)
+        stats.note(
+            f"throughput remote {remote_rate:.0f}/s vs local "
+            f"{local_rate:.0f}/s ({ratio:.1f}x)"
+        )
+        # Anything above the geometric mean of the two is remote.
+        STATE["threshold"] = (
+            (remote_rate * local_rate) ** 0.5 if ratio >= args.ratio else None
+        )
+    if STATE["threshold"] is None:
+        raise Skip(
+            "this instrument shows no usable throughput difference, so the "
+            "state cannot be read back from here. A native HiSLIP instrument "
+            "has no REN line and lands here"
+        )
+    return STATE["threshold"]
 
-                set_ren(mode)
-                after = observed_state()
 
-                stats.check(
-                    after == expected,
-                    state_check_name(mode),
-                    detail=f"from {before}, saw {after}",
-                )
+def observed_state() -> str:
+    """Best of three, because this oracle is a timing measurement.
 
-            for mode, reason in NOT_OBSERVABLE.items():
-                if mode not in supported:
-                    continue
-                st = set_ren(mode)
-                stats.check(
-                    st == StatusCode.success,
-                    f"{mode.name} is accepted",
-                    detail=f"got {st!r}",
-                )
-                stats.note(f"{mode.name} effect not checked: {reason}")
+    A single sample sitting near the threshold flips on unrelated load --
+    another process, a GC pause -- and produces a failure that does not
+    reproduce, which is worse than no check at all. Three samples and a
+    majority make it stable without hiding a state that genuinely did not
+    change: a code that does nothing loses all three.
+    """
+    line = threshold()
+    votes = [REMOTE if query_rate() > line else LOCAL for _ in range(3)]
+    return max(set(votes), key=votes.count)
 
-            # -- 4. round trip, repeatedly ------------------------------------
-            # A code that works once but not when repeated is worth catching.
-            flips = 0
-            for _ in range(max(2, args.iterations // 50)):
-                set_ren(constants.RENLineOperation.deassert_gtl)
-                if observed_state() != LOCAL:
-                    stats.error("repeated deassert_gtl failed to return to local")
-                    break
-                set_ren(constants.RENLineOperation.asrt_address)
-                if observed_state() != REMOTE:
-                    stats.error("repeated asrt_address failed to return to remote")
-                    break
-                flips += 1
-            else:
-                stats.check(
-                    True,
-                    "repeated remote/local round trips all succeed",
-                    detail=f"{flips} round trips",
-                )
 
-            # -- 5. leave it in remote -----------------------------------------
-            set_ren(constants.RENLineOperation.asrt_address)
-            final_state = observed_state()
-            stats.check(
-                final_state == REMOTE,
-                "the session ends in remote",
-                detail=f"observed {final_state}",
-            )
-            visa.check_errors(inst, stats, "at end of run")
+# -- 3. does each code do what it says? --------------------------------------
+def _state_check(mode, expected):
+    def run():
+        # Start from the opposite state, so a code that does nothing at all is
+        # caught rather than passing on the state its predecessor left behind.
+        threshold()
+        opposite = (
+            constants.RENLineOperation.deassert_gtl
+            if expected == REMOTE
+            else constants.RENLineOperation.asrt_address
+        )
+        set_ren(opposite)
+        before = observed_state()
+        set_ren(mode)
+        after = observed_state()
+        detail = f"from {before}, saw {after}"
+        assert after == expected, detail
+        return detail
 
-        stats.write_outputs(args)
-        return stats.finish()
+    return run
+
+
+def _not_observable_check(mode, reason):
+    def run():
+        threshold()
+        st = set_ren(mode)
+        CTX["stats"].note(f"{mode.name} effect not checked: {reason}")
+        assert st == StatusCode.success, f"got {st!r}"
+        return f"got {st!r}"
+
+    return run
+
+
+def _register_state_checks() -> None:
+    add = harness.registrar(globals())
+    for mode, expected in EXPECTED_STATE.items():
+        add(
+            _state_check(mode, expected),
+            state_check_name(mode),
+            protocols=protocols_for(mode),
+        )
+    for mode, reason in NOT_OBSERVABLE.items():
+        add(
+            _not_observable_check(mode, reason),
+            f"{mode.name} is accepted",
+            protocols=protocols_for(mode),
+        )
+
+
+_register_state_checks()
+
+
+# -- 4. round trip, repeatedly -----------------------------------------------
+@check("repeated remote/local round trips all succeed")
+def check_round_trips():
+    """A code that works once but not when repeated is worth catching."""
+    threshold()
+    flips = 0
+    for _ in range(max(2, CTX["args"].iterations // 50)):
+        set_ren(constants.RENLineOperation.deassert_gtl)
+        assert observed_state() == LOCAL, (
+            "repeated deassert_gtl failed to return to local"
+        )
+        set_ren(constants.RENLineOperation.asrt_address)
+        assert observed_state() == REMOTE, (
+            "repeated asrt_address failed to return to remote"
+        )
+        flips += 1
+    return f"{flips} round trips"
+
+
+# -- 5. leave it in remote ---------------------------------------------------
+@check("the session ends in remote")
+def check_ends_in_remote():
+    threshold()
+    set_ren(constants.RENLineOperation.asrt_address)
+    final_state = observed_state()
+    assert final_state == REMOTE, f"observed {final_state}"
+    return f"observed {final_state}"
 
 
 if __name__ == "__main__":
-    harness.main(main)
+    script.run(title="remote/local")

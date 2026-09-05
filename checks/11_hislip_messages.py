@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from testgear import cli, harness, visa  # noqa: E402
+from testgear import script, visa  # noqa: E402
 from testgear.harness import Skip, check  # noqa: E402
 
 # IVI-6.1 Table 4.
@@ -334,31 +334,5 @@ def check_prologue():
         return f"{len(client)} client messages, all with a valid prologue"
 
 
-def main() -> int:
-    parser = cli.build_parser(__doc__.splitlines()[0], protocol="hislip")
-    args = parser.parse_args()
-    if args.protocol != "hislip":
-        print("this suite is HiSLIP only", file=sys.stderr)
-        return 4
-
-    with cli.open_target(args) as (backend, resource, srv):
-        CTX.update(
-            backend=backend,
-            resource=resource,
-            server=srv,
-            timeout=args.timeout,
-            protocol=args.protocol,
-        )
-        stats = harness.Stats(
-            "hislip messages",
-            verbose=args.verbose,
-            context=cli.context(args, backend, resource),
-        )
-        checks = harness.collect(sys.modules[__name__], protocol="hislip")
-        harness.run_checks(checks, stats, watchdog=30.0)
-        stats.write_outputs(args)
-        return stats.finish()
-
-
 if __name__ == "__main__":
-    harness.main(main)
+    script.run()
