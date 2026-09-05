@@ -98,6 +98,11 @@ jobs:
             --page-url "${{ inputs.page-url }}"
           cat step-summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      # One sorted line per check, no measurements. Two runs' site artifacts
+      # diff on this file, and `tools/outcomes.py --against` names the changes.
+      - name: Outcomes, for diffing against another run
+        run: python tools/outcomes.py site/columns --out site/outcomes.txt
+
       - name: Verdict
         id: verdict
         run: python tools/ci_status.py --columns site/columns
