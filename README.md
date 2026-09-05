@@ -146,12 +146,71 @@ glance a skipped check reads like a passing one.
 | Path | What it is |
 | --- | --- |
 | `server/` | The Rust mock server. Vendored protocol code plus the virtual instrument, fault injector and control channel. |
-| `testgear/` | The Python harness: backend selection, the server fixture, PASS/FAIL/SKIP bookkeeping, HTML rendering. |
-| `checks/` | The checks themselves: nine numbered scripts plus two conformance suites. |
+| `testgear/` | The Python harness: backend selection, the server fixture, PASS/FAIL/SKIP bookkeeping, HTML rendering, and the entry point every check script shares (`testgear/script.py`). |
+| `checks/` | The checks themselves: seventeen numbered scripts plus two conformance suites. See [Writing a check](#writing-a-check). |
 | `reproducers/` | One runnable script per open finding, and the original bench diagnostics under `bench/`. |
 | `docs/findings.md` | What this suite has found, and what looked like a finding and was not. |
 | `run_all.py`, `compare.py` | The suite runner and the cross-backend matrix. `run_all.sh` is a shim over the first; both take their script list from `testgear/suite.py`. |
 | `.github/workflows/` | The same runs in CI, one Linux job per implementation, published to Pages. See [`docs/ci.md`](docs/ci.md). |
+
+## Writing a check
+
+A check is a function with a name, registered with `@check`. The name is what
+the cross-backend matrix joins on, so it is a static title of what is being
+checked and never varies with the outcome — the evidence goes in what the
+function returns, or in the message of the assertion that fails.
+
+```python
+@check("viFlush reports a VISA status", rule="VPP-4.3 3.2.4")
+def check_flush():
+    """An unsupported operation must report VI_ERROR_NSUP_OPER, not raise out
+    of the library: a caller cannot catch what it has no reason to expect."""
+    lib, sess = io()
+    st = visa.status(lib.flush, sess, constants.BufferOperation.discard_read_buffer)
+    assert st in (StatusCode.success, StatusCode.error_nonsupported_operation), f"got {st!r}"
+    return f"got {st!r}"
+```
+
+A check reports by raising: `AssertionError` for a failed expectation, `Skip`
+for "cannot run here", anything else for a check that broke. Returning
+normally is a pass, and the returned string becomes the detail. `rule=` names
+the clause it rests on — a failure that cites a rule is a bug report, one that
+does not is an opinion. `protocols=` limits it to the transports it makes
+sense for, and `watchdog=` overrides the file's timeout for a check that
+legitimately takes longer (`watchdog=0` turns it off).
+
+Three optional module-level names, all read by `testgear/script.py`:
+
+| Name | What it does |
+| --- | --- |
+| `CTX` | Filled in with the backend, resource, protocol, args and live `Stats` before any check runs. |
+| `SETUP(ctx)` | A context manager entered around the whole file, for a session or state the checks share. |
+| `add_arguments(parser)` | Options this script adds to the shared parser. |
+
+Then the whole entry point is:
+
+```python
+if __name__ == "__main__":
+    script.run()
+```
+
+Nothing is passed in that can be looked up: the module is the caller's, the
+title comes from the filename, and which transports the script belongs to
+comes from `testgear/suite.py`, which already had to know. **Add the script to
+`SCRIPTS` there** — one that is missing runs for whoever invokes it directly
+and for nobody else: not in `run_all.py`, not in the matrix, not in CI.
+`script.run()` says so on stderr if you forget.
+
+For a family of checks built in a loop, `harness.registrar` gives each one a
+distinct identity and an explicit position, which a plain factory cannot:
+
+```python
+def _register_chunk_checks() -> None:
+    add = harness.registrar(globals())
+    for chunk in (1, 7, 64, 997):
+        add(_intact(chunk), f"a large message read {chunk}B at a time is intact",
+            rule="VPP-4.3 RULE 6.1.2")
+```
 
 ## Reports
 

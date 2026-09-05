@@ -78,9 +78,6 @@ jobs:
         The pyvisa-py column only. No vendor implementation ran, so a failure
         here is a failure against the spec rather than a disparity with a
         shipping library.
-      # The gate is the point of this workflow: it is what a pull request
-      # actually wants to know.
-      gate: true
       # Pages is latest-only, and the page is the full matrix. A one-column run
       # replacing it would quietly turn "pyvisa-py against three shipping
       # implementations" into "pyvisa-py against nothing". Download the site

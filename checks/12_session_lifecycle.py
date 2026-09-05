@@ -24,7 +24,7 @@ from pyvisa import constants  # noqa: E402
 from pyvisa.constants import ResourceAttribute as RA  # noqa: E402
 from pyvisa.constants import StatusCode  # noqa: E402
 
-from testgear import cli, harness, visa  # noqa: E402
+from testgear import script, visa  # noqa: E402
 from testgear.harness import Skip, check  # noqa: E402
 
 #: VPP-4.3 3.2.3 fixes this value exactly.
@@ -247,28 +247,5 @@ def check_resource_name_roundtrip():
     return name
 
 
-def main() -> int:
-    parser = cli.build_parser(__doc__.splitlines()[0])
-    args = parser.parse_args()
-
-    with cli.open_target(args) as (backend, resource, srv):
-        CTX.update(
-            backend=backend,
-            resource=resource,
-            server=srv,
-            timeout=args.timeout,
-            protocol=args.protocol,
-        )
-        stats = harness.Stats(
-            f"session lifecycle ({args.protocol})",
-            verbose=args.verbose,
-            context=cli.context(args, backend, resource),
-        )
-        checks = harness.collect(sys.modules[__name__], protocol=args.protocol)
-        harness.run_checks(checks, stats, watchdog=30.0)
-        stats.write_outputs(args)
-        return stats.finish()
-
-
 if __name__ == "__main__":
-    harness.main(main)
+    script.run()
