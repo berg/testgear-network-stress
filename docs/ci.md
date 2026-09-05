@@ -138,21 +138,15 @@ So exit 2 means what it says: something broke that no check was watching. If a
 new one appears, the fix is usually to move the offending call inside a check
 and give it a clause, not to catch it more broadly.
 
-Plus a regression against `docs/ci-baseline.json`: a check the baseline records
-as passing that now fails **or now skips**. A new skip counts, deliberately —
-in the suite this one grew out of, the large-reply checks stayed skipped
-through an entire development cycle unnoticed, because at a glance a skipped
-check reads like a passing one.
-
-The baseline is not committed yet. Generating one here would be macOS outcomes
-judging Linux runs. The first green run on `main` should write it:
-
-```bash
-tools/ci_status.py --columns site/columns --write-baseline
-```
-
-Until then the gate says so and passes. A full run never gates at all — its
-output is the page, not a verdict.
+That is the whole list. There is no baseline of expected outcomes and no
+regression gate, and there used to be. It went because it answered the wrong
+question: this suite exists to report on VISA implementations, so a check that
+pyvisa-py newly fails is a new finding, and the page is where a finding
+belongs. Turning it into a red build on a pull request to *this* repository
+made the build about how this project was doing rather than about the
+libraries, and nobody could make it green by fixing this project. Whether
+pyvisa-py got better or worse between two commits is a difference between two
+runs of the page.
 
 ## Columns that did not run
 
@@ -194,8 +188,8 @@ pins it to glibc 2.31 on purpose, and a runner-built binary would undo that.
 Stated plainly, and kept current -- the list shrinks as things get run.
 
 What *has* been exercised: the `py` leg end to end on GitHub's runners over
-four runs, the aggregate, the Markdown summary and the baseline gate in both
-directions; and the `py` image built and run under podman, where the mounted
+four runs, the aggregate, the Markdown summary and the verdict; and the `py`
+image built and run under podman, where the mounted
 `/pyvisa-py` tree, the provenance block and the port-111 portmapper bind were
 all confirmed. What has not:
 
@@ -212,7 +206,7 @@ all confirmed. What has not:
   guess is an unavailable column rather than a failed build. Trim it to the one
   branch that is actually needed once the real package exists.
 - **`environment: ""`** is used to mean "no environment" for the non-vendor
-  legs. Confirm on the first run that a `py` leg is not gated.
+  legs. Confirm on the first run that a `py` leg is not held up by it.
 
 ## Provisioning
 

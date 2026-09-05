@@ -21,10 +21,6 @@ on:
       page-url:
         type: string
         default: ""
-      gate:
-        description: Fail the run on a regression against docs/ci-baseline.json
-        type: boolean
-        default: true
       pages:
         description: Also upload the site as a Pages artifact, for a deploy job
         type: boolean
@@ -104,10 +100,7 @@ jobs:
 
       - name: Verdict
         id: verdict
-        run: |
-          gate=--gate-subject
-          [[ "${{ inputs.gate }}" == "true" ]] || gate=--no-gate-subject
-          python tools/ci_status.py --columns site/columns "$gate"
+        run: python tools/ci_status.py --columns site/columns
 
       - name: Upload the site
         if: always()

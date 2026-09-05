@@ -78,9 +78,6 @@ jobs:
         pyvisa and pyvisa-py.
       page-url: https://berg.github.io/testgear-network-stress/
       pages: true
-      # A full run's output is the page. Its job is to say what the
-      # implementations did, not to pass or fail.
-      gate: false
 
   publish:
     needs: [aggregate]

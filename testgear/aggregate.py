@@ -197,28 +197,6 @@ class Matrix:
     def all_skipped(self) -> list[Row]:
         return [r for r in self.rows if r.all_skipped]
 
-    def subject_columns(self, subject: str = "py") -> list[int]:
-        """Which compared columns are one named implementation.
-
-        Used by the CI gate, which asks about one leg against its baseline and
-        is the one place a subject genuinely exists. The published page has no
-        subject: it compares four implementations, and `unique_failures_by_
-        column` asks the same question of each.
-
-
-        More than one column can be the same implementation -- pyvisa-py on
-        Linux and on Windows is the useful case, because it gives every
-        cross-OS disagreement a same-OS control. They are one subject, so
-        `backend` is matched before the display label, which is identical for
-        both.
-        """
-        by_backend = [
-            i for i in self.compared if self.columns[i].get("backend") == subject
-        ]
-        if by_backend:
-            return by_backend
-        return [i for i in self.compared if label(self.columns[i]) == subject]
-
     def unique_failures_by_column(self) -> "collections.OrderedDict[int, list[Row]]":
         """Per column, the rows only that column fails.
 
