@@ -80,6 +80,29 @@ def leg_reports(root: Path, protocol: str) -> list[Path]:
     return sorted(found, key=lambda p: order.get(p.stem[: -len(protocol) - 1], 999))
 
 
+def leg_root(src: Path, leg_id: str) -> Path | None:
+    """Where one leg's artifact landed, or None if it never arrived.
+
+    actions/download-artifact puts each artifact under <root>/<name>/ when a
+    pattern matches several, and flattens straight into <root>/ when it
+    matches exactly one -- so a one-leg run, which is what the pyvisa-py
+    workflow is, arrives with no reports-<id>/ directory at all. The manifest
+    every leg writes carries its own id, which is what tells a flattened
+    artifact apart from an empty download root.
+    """
+    nested = src / f"reports-{leg_id}"
+    if nested.is_dir():
+        return nested
+    manifest = src / "leg.json"
+    if manifest.exists():
+        try:
+            if json.loads(manifest.read_text(encoding="utf-8")).get("id") == leg_id:
+                return src
+        except ValueError:
+            pass
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--in", dest="src", required=True)
@@ -123,15 +146,8 @@ def main() -> int:
                 "order": leg.get("order", 0),
                 "file": f"{leg['id']}.json",
             }
-            # Artifacts land as <download root>/reports-<leg id>/.
-            root = src / f"reports-{leg['id']}"
-            status_path = root / "leg.json"
-            status = (
-                json.loads(status_path.read_text(encoding="utf-8"))
-                if status_path.exists()
-                else {}
-            )
-            if not root.is_dir():
+            root = leg_root(src, leg["id"])
+            if root is None:
                 # No artifact at all: the job did not even reach its upload
                 # step. Said plainly rather than left as an absence.
                 entry.update(
@@ -140,6 +156,12 @@ def main() -> int:
                 )
                 index.append(entry)
                 continue
+            status_path = root / "leg.json"
+            status = (
+                json.loads(status_path.read_text(encoding="utf-8"))
+                if status_path.exists()
+                else {}
+            )
 
             # Carried through so the verdict has one input. exit codes are
             # the only thing that separates "a check failed", which is the
@@ -204,8 +226,12 @@ def main() -> int:
     if args.raw:
         raw = Path(args.raw)
         raw.mkdir(parents=True, exist_ok=True)
-        for leg_dir in sorted(src.glob("reports-*")):
-            shutil.copytree(leg_dir, raw / leg_dir.name, dirs_exist_ok=True)
+        for leg in plan:
+            leg_dir = leg_root(src, leg["id"])
+            if leg_dir is not None:
+                shutil.copytree(
+                    leg_dir, raw / f"reports-{leg['id']}", dirs_exist_ok=True
+                )
     return 0
 
 
