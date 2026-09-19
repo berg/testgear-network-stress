@@ -38,6 +38,12 @@ that wedges then reports what it got through instead of printing nothing at
 all, which is what a captured-and-never-flushed run looks like from outside:
 the header line, and then silence for as long as you are willing to wait.
 
+`--sessions N` caps how many connections `04_concurrency.py` opens to the
+instrument at once; left unset, that script's own default of 6 applies. Some
+instruments cap concurrent connections well below that and stop accepting any
+at all for the rest of the run once you pass it -- a 34465A's HiSLIP server
+does -- so against unfamiliar hardware it is worth starting low.
+
 The sweep also stops once two scripts in a row have failed every check because
 the target stopped accepting connections. An instrument that has run out of
 links or sessions fails everything after that point for the same one reason,

@@ -34,6 +34,12 @@ class Script:
     #: its single summary check says nothing in a matrix.
     in_matrix: bool = True
 
+    #: Arguments that come from a runner flag the caller may not have set,
+    #: as (flag, keyword). The pair is emitted only when the runner was given
+    #: a value, so the script's own `add_arguments` default stays the single
+    #: definition of it rather than being shadowed by a second one here.
+    optional: tuple[tuple[str, str], ...] = ()
+
     #: Seconds this script needs *on top of* the runner's per-script timeout,
     #: as a `{iter}`/`{soak}` template. Only the soak has one: its duration is
     #: the caller's choice, so no constant can be right for both `--soak 60`
@@ -47,8 +53,21 @@ class Script:
             return wanted
         return (self.only,) if self.only in wanted else ()
 
-    def argv(self, *, iterations: int, soak: int) -> list[str]:
-        return [a.format(iter=iterations, soak=soak) for a in self.args]
+    def argv(self, *, iterations: int, soak: int, **optional) -> list[str]:
+        """The arguments this script is run with.
+
+        `optional` carries the runner flags that are not always set --
+        `sessions=None` means "the caller did not ask", and the script's own
+        default applies. Passing them through unconditionally would make this
+        file a second place that decides how many parallel sessions is
+        reasonable, and the two would drift.
+        """
+        out = [a.format(iter=iterations, soak=soak) for a in self.args]
+        for flag, key in self.optional:
+            value = optional.get(key)
+            if value is not None:
+                out += [flag, str(value)]
+        return out
 
     def budget(self, *, default: float, iterations: int, soak: int) -> float:
         """Wall clock this script may take before the runner kills it."""
@@ -64,7 +83,16 @@ SCRIPTS: tuple[Script, ...] = (
     Script("01_smoke.py"),
     Script("02_io.py", ("-n", "{iter}")),
     Script("03_srq.py", ("-n", "30")),
-    Script("04_concurrency.py", ("-n", "{iter}")),
+    # --sessions opens that many connections to one instrument at once, and
+    # some instruments cap them well below the default: a 34465A's HiSLIP
+    # server stopped accepting connections entirely for the rest of the run
+    # (issue #5). Reachable from the sweep so a target that cannot take six
+    # can be told so without invoking this script by hand.
+    Script(
+        "04_concurrency.py",
+        ("-n", "{iter}"),
+        optional=(("--sessions", "sessions"),),
+    ),
     Script("05_lock.py", ("-n", "{iter}")),
     Script("06_terminate.py", ("-n", "15")),
     Script("07_clear.py", ("-n", "40")),

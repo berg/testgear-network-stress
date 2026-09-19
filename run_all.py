@@ -135,6 +135,15 @@ def main() -> int:
     parser.add_argument("--soak", type=int, default=60)
     parser.add_argument("--iterations", type=int, default=300)
     parser.add_argument(
+        "--sessions",
+        type=int,
+        metavar="N",
+        help="how many sessions 04_concurrency.py opens to the instrument at "
+        "once. Left unset it uses that script's own default (6). Some "
+        "instruments cap concurrent connections well below that and stop "
+        "accepting any for the rest of the run once you pass it",
+    )
+    parser.add_argument(
         "--script-timeout",
         type=float,
         default=DEFAULT_SCRIPT_TIMEOUT,
@@ -168,7 +177,11 @@ def main() -> int:
             ran += 1
             name = script.name
             cmd = [sys.executable, str(HERE / "checks" / name), "--protocol", proto]
-            cmd += script.argv(iterations=args.iterations, soak=args.soak)
+            cmd += script.argv(
+                iterations=args.iterations,
+                soak=args.soak,
+                sessions=args.sessions,
+            )
             if reports:
                 cmd += ["--report", str(reports / f"{name[:-3]}-{proto}.json")]
             cmd += passthrough

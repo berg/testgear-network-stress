@@ -141,6 +141,13 @@ def main() -> int:
     )
     parser.add_argument("--soak", type=int, default=60)
     parser.add_argument(
+        "--sessions",
+        type=int,
+        metavar="N",
+        help="parallel sessions for 04_concurrency.py; unset uses its own "
+        "default. Lower it for an instrument that caps concurrent connections",
+    )
+    parser.add_argument(
         "--timeout", type=float, default=600.0, help="per-script timeout in seconds"
     )
     # The repo venv when there is one, otherwise whatever is running this --
@@ -239,7 +246,9 @@ def main() -> int:
             # The suite's arguments first, then the caller's passthrough, so an
             # explicit -n on the command line still wins.
             script_args = script.argv(
-                iterations=args.iterations, soak=args.soak
+                iterations=args.iterations,
+                soak=args.soak,
+                sessions=args.sessions,
             ) + extra
             rep, rc = run_one(
                 args.python,
