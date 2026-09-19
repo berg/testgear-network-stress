@@ -76,6 +76,15 @@ def SETUP(ctx):
         ctx["session"] = session
         STATE["idn"] = session.query("*IDN?").strip()
         visa.drain_errors(session)
+        # Every cycle here writes a command with no response and then aborts
+        # the read that blocks on it. An instrument that keeps an error queue
+        # records the abandoned query; that is this script working, not the
+        # transport failing.
+        ctx["stats"].expect_desync(
+            (-410, -420),
+            "every terminate cycle aborts a read that was waiting on a "
+            "command with no response",
+        )
         try:
             yield
         finally:

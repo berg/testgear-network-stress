@@ -152,6 +152,9 @@ class Stats:
         self.ok = 0
         self.failures: list[str] = []
         self.skipped: list[str] = []
+        #: SCPI error codes this script is expected to provoke, and why; see
+        #: `expect_desync`.
+        self.expected_desync: dict[int, str] = {}
         self._lock = threading.Lock()
         self.started = time.time()
         print(f"=== {name} ===")
@@ -265,6 +268,30 @@ class Stats:
         with self._lock:
             self.notes.append(message)
             print(f"  ---- {message}")
+
+    def expect_desync(self, codes: Iterable[int], reason: str) -> None:
+        """Declare SCPI errors this script provokes on purpose.
+
+        `visa.check_errors` treats a desync in the instrument's error queue as
+        a finding, because a message flow that went wrong is exactly what a
+        transport bug produces. Three scripts here break the message flow
+        deliberately -- 06 aborts a blocked read with viTerminate, 07 clears
+        the device mid-query, 08 abandons a partial read in its random mix --
+        and a real instrument dutifully records the `-410` or `-420` that
+        results. Against the mock the queue comes back empty and nobody
+        noticed; against an E5810A and a 34465A alike, every one of those
+        scripts ended on a failure it had caused itself.
+
+        A declared code is reported as a note naming the reason instead. The
+        cost is real and worth stating: inside these scripts a genuine desync
+        of the same code is now a note too. It has to be. The suite cannot
+        tell its own aborted read apart from a client bug that aborted one,
+        and guessing in either direction is worse than saying which script
+        was holding the knife.
+        """
+        with self._lock:
+            for code in codes:
+                self.expected_desync[int(code)] = reason
 
     # -- reporting ---------------------------------------------------------
     def report(self) -> dict:

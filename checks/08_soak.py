@@ -75,10 +75,25 @@ def SETUP(ctx):
         STATE["big_query"] = visa.resolve_big_query(
             ctx["args"], ctx["server"], session, ctx["stats"]
         )
+        # Whether the reference is worth comparing against byte for byte.
+        # Against the mock TEST:BIG? is fixed; against an instrument the
+        # default is *LRN?, whose answer this very script then spends a
+        # minute changing.
+        STATE["stable"] = bool(STATE["big_query"]) and visa.big_query_is_stable(
+            session, STATE["big_query"], ctx["stats"]
+        )
         STATE["big"] = (
             session.query(STATE["big_query"]) if STATE["big_query"] else None
         )
         visa.drain_errors(session)
+        # The mix contains viClear and a partial read that stops early by
+        # design, either of which leaves a query unfinished. Over thousands of
+        # operations at least one lands next to a write.
+        ctx["stats"].expect_desync(
+            (-410, -420),
+            "the operation mix includes device clear and a deliberately "
+            "partial read, both of which abandon a query in flight",
+        )
         try:
             yield
         finally:
@@ -107,6 +122,15 @@ def check_soak():
     lib, sess = inst.visalib, inst.session
     rng = random.Random(args.seed)
     idn, big, big_query = STATE["idn"], STATE["big"], STATE["big_query"]
+    stable = STATE.get("stable", True)
+
+    def big_reply_is_wrong(got: str) -> bool:
+        """Whether a large reply came back damaged, as far as we can tell.
+
+        An unstable query only licenses the length compare; see
+        `visa.big_query_is_stable`.
+        """
+        return got != big if stable else len(got) != len(big)
 
     handler = wrapped = None
     srq_count = [0]
@@ -159,21 +183,47 @@ def check_soak():
                             detail=f"returned {got!r}",
                         )
                 elif op == "big_query":
-                    if inst.query(big_query) != big:
-                        stats.error("large query returned the wrong bytes")
+                    if big_reply_is_wrong(inst.query(big_query)):
+                        stats.error(
+                            "large query returned the wrong bytes"
+                            if stable
+                            else "large query returned the wrong number of bytes"
+                        )
                 elif op == "partial_read":
                     lib.write(sess, big_query.encode() + b"\n")
                     collected = bytearray()
-                    while len(collected) < len(big):
+                    # Read until the instrument says END, not until the
+                    # reference length is reached. Those are the same number
+                    # only while the reply is the size it was at startup, and
+                    # a reply that grew leaves its tail in the stream --
+                    # which the next operation then reads as its own answer.
+                    # One such read desynchronises everything after it, which
+                    # is what 72 "wrong bytes" failures in a single 34465A run
+                    # actually were: one unread tail, echoing.
+                    ended = False
+                    # Bounded, because this check runs under `watchdog=0` --
+                    # the soak's duration is the caller's to choose, so no
+                    # constant could be right for it -- and a loop with no
+                    # watchdog over it is the one shape that turns a
+                    # misbehaving instrument into a suite that never returns.
+                    # A single byte at a time is the worst case, so allow the
+                    # reference length in reads plus slack, then give up.
+                    for _ in range(len(big) + 64):
                         data, st = visa.call(
                             lib.read, sess, rng.choice((1, 13, 512, 8192))
                         )
-                        if not data:
+                        if not data and st != StatusCode.success:
                             break
                         collected.extend(data)
                         if st == StatusCode.success:
+                            ended = True
                             break
-                    if collected.decode("latin-1") != big:
+                    if not ended:
+                        # The reply never ended: either it stopped early or
+                        # it outran the buffer. Resynchronise before the next
+                        # operation inherits the remains.
+                        visa.status(lib.clear, sess)
+                    if big_reply_is_wrong(collected.decode("latin-1")):
                         stats.error("a chunked read reassembled incorrectly")
                 elif op == "read_stb":
                     stb = inst.read_stb()
@@ -266,7 +316,35 @@ def check_soak():
 
 @check("the session is healthy at the end of the soak")
 def check_healthy_after_soak():
-    final = CTX["session"].query("*IDN?").strip()
+    """Did the session survive, and if not, does a clear bring it back?
+
+    This used to be a bare `query`, so a session the soak had broken ended
+    the run with a thirty-line traceback filed as "unexpected exception".
+    That is the least useful rendering of the most interesting result here:
+    the answer wanted is which VISA status came back, and whether the session
+    was wedged or merely desynchronised -- a distinction viClear exists to
+    draw, and the one a caller needs to know whether the instrument needs
+    power cycling before the next run.
+    """
+    inst = CTX["session"]
+    try:
+        final = inst.query("*IDN?").strip()
+    except Exception as exc:  # noqa: BLE001
+        status = visa.visa_status(exc)
+        try:
+            inst.clear()
+            recovered = inst.query("*IDN?").strip()
+        except Exception as after:  # noqa: BLE001
+            raise AssertionError(
+                f"the session did not answer after the soak ({status}) and a "
+                f"device clear did not revive it ({visa.visa_status(after)}); "
+                f"it is wedged, not desynchronised"
+            ) from None
+        raise AssertionError(
+            f"the session did not answer after the soak ({status}), though a "
+            f"device clear revived it and it then returned {recovered!r}; the "
+            f"soak left the message flow desynchronised rather than dead"
+        ) from None
     assert final == STATE["idn"], f"got {final!r}"
     return f"got {final!r}"
 

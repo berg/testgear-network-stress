@@ -104,6 +104,13 @@ def SETUP(ctx):
         ctx["session"] = session
         STATE["idn"] = session.query("*IDN?").strip()
         visa.drain_errors(session)
+        # Clearing a device with a query in flight is the whole subject of
+        # this script, and discarding that query is what viClear is for.
+        ctx["stats"].expect_desync(
+            (-410, -420),
+            "clearing the device mid-query discards a query in flight, which "
+            "is what these checks are testing",
+        )
         STATE["big_query"] = visa.resolve_big_query(
             ctx["args"], ctx["server"], session, ctx["stats"]
         )

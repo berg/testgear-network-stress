@@ -189,15 +189,26 @@ def drain_errors(inst, limit: int = 50) -> list[str]:
 
 
 def check_errors(inst, stats, context: str = "") -> list[str]:
-    """Drain the error queue, failing on anything that smells like a desync."""
+    """Drain the error queue, failing on anything that smells like a desync.
+
+    A code the script declared through `Stats.expect_desync` is a note naming
+    what provoked it, not a failure: a check that aborts a read on purpose
+    owns the `-410` the instrument records for it.
+    """
     where = f" {context}" if context else ""
+    expected = getattr(stats, "expected_desync", {})
     found = drain_errors(inst)
     for entry in found:
         try:
             code = int(entry.split(",")[0])
         except ValueError:
             code = 0
-        if code in DESYNC_ERRORS:
+        if code in expected:
+            stats.note(
+                f"instrument reported {entry}{where}, which this script "
+                f"provokes on purpose: {expected[code]}"
+            )
+        elif code in DESYNC_ERRORS:
             stats.error(f"instrument reported an I/O desync{where}: {entry}")
         else:
             stats.note(f"instrument error{where}: {entry}")
@@ -306,6 +317,49 @@ def prepare_instrument(inst, stats):
         stats.note(f"--prepare: raised the timeout to {recipe['timeout']} ms")
     drain_errors(inst)
     return recipe["big_query"]
+
+
+def big_query_is_stable(inst, query: str, stats) -> bool:
+    """Whether `query` answers the same thing twice running.
+
+    The large-reply checks compare a reply against a reference taken earlier,
+    so they are only measuring the transport if the instrument's answer does
+    not move on its own. `*LRN?` -- the default against real hardware -- is
+    the instrument's settings dump, and the soak spends its whole run changing
+    settings: device clear, REN, LLO. Every `big_query` operation then
+    compared a fresh dump against one taken before any of that and reported
+    "large query returned the wrong bytes", 72 times in one run against a
+    34465A, for a transport that had done nothing wrong.
+
+    `PREPARE_RECIPES` already carries this lesson for a different query --
+    "READ? takes a fresh measurement each time, so two reads of it differ in
+    content while matching in length, which looks exactly like a transport
+    fault and is not one". Same trap, and the recipe only avoids it for the
+    one instrument that has a recipe.
+
+    When the answer moves, the checks fall back to comparing lengths, which
+    still catches what they exist to catch: a truncated reply, a botched
+    reassembly, a chunk boundary eaten. It does not catch a corrupted byte in
+    the middle, and the note says so rather than letting a weaker check pass
+    for the stronger one.
+    """
+    try:
+        first = inst.query(query)
+        second = inst.query(query)
+    except Exception:  # noqa: BLE001
+        drain_errors(inst)
+        return False
+    if first == second:
+        return True
+    same_length = len(first) == len(second)
+    stats.note(
+        f"{query} answers differently each time it is asked "
+        f"({len(first)} then {len(second)} bytes), so it reports instrument "
+        f"state rather than a fixed payload. The large-reply checks compare "
+        f"lengths only" + ("" if same_length else " and even those disagree")
+        + f" -- name a stable --big-query to get back a byte-for-byte compare"
+    )
+    return False
 
 
 def resolve_big_query(args, server, inst, stats) -> str | None:
