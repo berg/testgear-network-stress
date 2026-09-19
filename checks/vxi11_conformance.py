@@ -526,13 +526,28 @@ def check_recovery_after_timeout():
 
 @check("VI_ATTR_TCPIP_KEEPALIVE can be turned on", rule="VPP-4.3 3.5")
 def check_keepalive():
+    """`value is True` is not the same question as "is keepalive on".
+
+    VI_ATTR_TCPIP_KEEPALIVE is a ViBoolean, and what comes back through
+    ctypes is the integer VI_TRUE. pyvisa-py hands back a `bool` and NI-VISA
+    hands back `1`, so an identity test against `True` failed against every
+    real instrument this suite has ever been pointed at, with the
+    self-refuting message "keepalive did not read back as on (success, 1)".
+    The equivalent check in 01_smoke compares truthily and passed throughout,
+    which is how long two checks can disagree about the same attribute
+    without anyone noticing.
+
+    Truthiness, not equality with 1: VI_TRUE is defined as 1, but a backend
+    returning some other non-zero for a ViBoolean is answering the question
+    asked, and this check is not the place to litigate that.
+    """
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         _, st = visa.call(lib.set_attribute, sess, RA.tcpip_keepalive, True)
         value, get_st = visa.call(lib.get_attribute, sess, RA.tcpip_keepalive)
         visa.call(lib.set_attribute, sess, RA.tcpip_keepalive, False)
         assert st == StatusCode.success, f"setting keepalive returned {st!r}"
-        assert get_st == StatusCode.success and value is True, (
+        assert get_st == StatusCode.success and bool(value), (
             f"keepalive did not read back as on ({get_st!r}, {value!r})"
         )
         return f"set {st!r}, read back {value!r} ({get_st!r})"
@@ -567,7 +582,23 @@ def check_send_end_flag():
         return observed
 
 
-@check("closing the session destroys the link", rule="VXI-11 B.6.16")
+#: Open/close cycles that would prove the point outright. B.6.5 leaves the
+#: cap to the server; everything this suite has met caps well below this.
+LINK_CYCLES = 80
+
+#: How long this check may spend trying. It is one of the few here whose cost
+#: is set by the target rather than by the check: a cycle is a TCP connect, a
+#: CREATE_LINK, a query and a DESTROY_LINK, which is a millisecond against the
+#: mock on loopback and a quarter-second against an instrument across a
+#: switch. Eighty of those is 20 seconds, which is exactly the file's watchdog,
+#: so against a 34465A this check did not fail -- it was abandoned mid-cycle
+#: and reported as a hang, with a thread left holding a link, which is its own
+#: small contribution to running the server out of links.
+LINK_BUDGET_S = 45.0
+
+
+@check("closing the session destroys the link", rule="VXI-11 B.6.16",
+       watchdog=LINK_BUDGET_S + 20.0)
 def check_close_destroys_link():
     """Links are a finite server resource (B.6.5 caps them).
 
@@ -575,8 +606,17 @@ def check_close_destroys_link():
     open, and the symptom arrives much later as an unexplained refusal to open
     anything at all. Opening far more sessions than the cap, one at a time, is
     the cheap way to prove it does not.
+
+    How many cycles that takes is not knowable in advance -- the cap is the
+    server's to choose -- so this runs as many as the budget allows and says
+    how many it got. A short run is weaker evidence, not a different verdict:
+    a leak shows up on the cycle after the cap, and if the cap is above what
+    fits here the check cannot see it either way. Saying so is the point of
+    reporting the count.
     """
-    for i in range(80):
+    deadline = time.time() + LINK_BUDGET_S
+    done = 0
+    for i in range(LINK_CYCLES):
         try:
             with open_inst() as inst:
                 inst.query("*IDN?")
@@ -585,7 +625,18 @@ def check_close_destroys_link():
                 f"open/close cycle {i} failed with {visa.visa_status(exc)}; "
                 f"the server ran out of links, so closing does not destroy them"
             ) from None
-    return "80 sequential open/close cycles"
+        done = i + 1
+        if time.time() > deadline:
+            break
+    if done < LINK_CYCLES:
+        per = LINK_BUDGET_S / max(done, 1)
+        return (
+            f"{done} sequential open/close cycles in {LINK_BUDGET_S:.0f}s "
+            f"({per * 1000:.0f} ms each); no leak up to there, but this target "
+            f"is too slow to reach {LINK_CYCLES} within the budget, so a cap "
+            f"above {done} would not have been found"
+        )
+    return f"{LINK_CYCLES} sequential open/close cycles"
 
 
 if __name__ == "__main__":
