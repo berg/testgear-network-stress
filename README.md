@@ -32,6 +32,18 @@ has turned up is a difference between them. `REPORTS=dir ./run_all.sh` also
 writes a JSON report per script; `SOAK=300 ITER=2000 ./run_all.sh` leans on it
 harder.
 
+Each script streams its output as it runs and is killed if it outstays
+`--script-timeout` (300s by default, plus the soak's own duration). A script
+that wedges then reports what it got through instead of printing nothing at
+all, which is what a captured-and-never-flushed run looks like from outside:
+the header line, and then silence for as long as you are willing to wait.
+
+The sweep also stops once two scripts in a row have failed every check because
+the target stopped accepting connections. An instrument that has run out of
+links or sessions fails everything after that point for the same one reason,
+and a summary of two hundred failures under the names of checks that never ran
+is worse than no summary. `--keep-going` runs the rest anyway.
+
 The Rust server builds itself on first use; you need a Rust toolchain
 ([rustup.rs](https://rustup.rs)) or a prebuilt binary in
 `TESTGEAR_MOCK_SERVER`.

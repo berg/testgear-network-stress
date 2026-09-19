@@ -11,3 +11,4 @@ vendor/*
 !vendor/README.md
 reports/
 reports-*/
+notes/

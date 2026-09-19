@@ -34,6 +34,13 @@ class Script:
     #: its single summary check says nothing in a matrix.
     in_matrix: bool = True
 
+    #: Seconds this script needs *on top of* the runner's per-script timeout,
+    #: as a `{iter}`/`{soak}` template. Only the soak has one: its duration is
+    #: the caller's choice, so no constant can be right for both `--soak 60`
+    #: and an overnight run. Everything else is bounded by its own watchdogs
+    #: and the runner's default is a backstop for the script wedging entirely.
+    extra_budget: str = ""
+
     def protocols(self, wanted: tuple[str, ...]) -> tuple[str, ...]:
         """Which of `wanted` this script should actually be run against."""
         if self.only is None:
@@ -42,6 +49,12 @@ class Script:
 
     def argv(self, *, iterations: int, soak: int) -> list[str]:
         return [a.format(iter=iterations, soak=soak) for a in self.args]
+
+    def budget(self, *, default: float, iterations: int, soak: int) -> float:
+        """Wall clock this script may take before the runner kills it."""
+        if not self.extra_budget:
+            return default
+        return default + float(self.extra_budget.format(iter=iterations, soak=soak))
 
 
 #: Every script, in run order. The spec-conformance scripts are where nearly
@@ -63,7 +76,12 @@ SCRIPTS: tuple[Script, ...] = (
     Script("16_operations.py"),
     Script("17_resource_names.py"),
     Script("conformance.py"),
-    Script("08_soak.py", ("--duration", "{soak}", "--srq-thread"), in_matrix=False),
+    Script(
+        "08_soak.py",
+        ("--duration", "{soak}", "--srq-thread"),
+        in_matrix=False,
+        extra_budget="{soak}",
+    ),
     Script("vxi11_conformance.py", only="vxi11"),
     Script("14_vxi11_flags.py", only="vxi11"),
     Script("11_hislip_messages.py", only="hislip"),
