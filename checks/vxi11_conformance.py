@@ -330,13 +330,35 @@ def check_zero_max_recv_size():
         srv.set_vxi11_faults()
 
 
-@check("a write larger than maxRecvSize is split", rule="VXI-11 B.6.4")
+#: The smallest maxRecvSize a conformant server may report. RULE B.6.3: a
+#: create_link reply SHALL "return in maxRecvSize the size of the largest
+#: data parameter the network instrument server can accept in a device_write
+#: RPC. This value SHALL be at least 1024."
+MIN_MAX_RECV_SIZE = 1024
+
+
+@check("a write larger than maxRecvSize is split", rule="VXI-11 B.6.5")
 def check_write_splitting():
-    """B.6.4: the client must divide a write exceeding maxRecvSize itself.
+    """The client divides a write exceeding maxRecvSize itself.
 
     The mock reports a small maxRecvSize and the observation log is checked
     for more than one write reaching the instrument -- the client-side split
     is invisible from the reply alone.
+
+    Faulted to 1024, not smaller. This check used to use 64, which no server
+    is allowed to report: RULE B.6.3 sets the floor at 1024, so a client that
+    ignored 64 was not necessarily doing anything wrong and a failure here
+    was not necessarily a finding. 1024 is the smallest value a client must
+    actually honour, which makes the result mean something. Raised by hb020
+    against a KS34465A in issue #5.
+
+    OBSERVATION B.6.5 is where the behaviour is written down -- "if a
+    controller needs to send greater than maxRecvSize bytes to the device at
+    one time, then the network instrument client makes multiple calls to
+    device_write" -- and it is an observation, not a rule, so this is a check
+    on what every working client does rather than on what one SHALL do. The
+    citation used to read B.6.4, which is about clientId and has nothing to
+    do with any of this.
     """
     srv = server()
     # A command rather than a query: a query left unanswered leaves the
@@ -345,7 +367,9 @@ def check_write_splitting():
     # unfaulted cases need separate sessions -- but only two, not four. The
     # first version opened four and exceeded the watchdog under NI-VISA, which
     # tripped a server restart and made every check after it fail at viOpen.
-    payload = "*CLS;" + "*CLS;" * 80
+    # Comfortably over the 1024 floor, so the split is unambiguous: this
+    # should arrive in three writes rather than one.
+    payload = "*CLS;" * 520
 
     with open_inst() as inst:
         srv.reset()
@@ -354,7 +378,7 @@ def check_write_splitting():
         plain_writes = len(srv.writes())
         visa.drain_errors(inst)
 
-    srv.set_vxi11_faults(max_recv_size=64)
+    srv.set_vxi11_faults(max_recv_size=MIN_MAX_RECV_SIZE)
     try:
         with open_inst() as inst:
             srv.reset()
@@ -368,9 +392,10 @@ def check_write_splitting():
                 f"{len(joined)} bytes across {len(writes)} writes"
             )
             assert len(writes) > plain_writes, (
-                f"a maxRecvSize of 64 produced {len(writes)} write(s), the "
-                f"same as the {plain_writes} sent without it, so the message "
-                f"was not divided at all"
+                f"a maxRecvSize of {MIN_MAX_RECV_SIZE} produced "
+                f"{len(writes)} write(s) for {len(payload)}B, the same as the "
+                f"{plain_writes} sent without it, so the message was not "
+                f"divided at all"
             )
             return (
                 f"{len(payload)}B arrived in {len(writes)} writes, against "
