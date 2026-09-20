@@ -296,8 +296,8 @@ def check_shared_lock():
         # Requiring one would be requiring the backend to invent it, which is
         # why the key check below is HiSLIP-only rather than skipped here.
         CTX["stats"].note(
-            f"shared-lock key is not meaningful over VXI-11 "
-            f"(RULE B.6.72: locks are exclusive); got {key!r}"
+            f"shared-lock key is not meaningful over VXI-11, whose "
+            f"device_lock carries no lock type or key; got {key!r}"
         )
     assert st == StatusCode.success, f"got {st!r}"
     return f"got {st!r}"
