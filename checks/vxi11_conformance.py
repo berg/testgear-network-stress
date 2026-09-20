@@ -109,7 +109,7 @@ def check_read_end():
 
 
 @check("viRead reports VI_SUCCESS_TERM_CHAR when a termchar stopped it",
-       rule="VPP-4.3 RULE 6.1.3")
+       rule="VPP-4.3 RULE 6.1.2")
 def check_read_termchar():
     srv = server()
     srv.respond("TEST:LINES?", "first\nsecond")
@@ -133,7 +133,7 @@ def check_read_termchar():
 
 
 @check("viRead reports VI_SUCCESS_MAX_CNT when the caller's buffer filled",
-       rule="VPP-4.3 RULE 6.1.2")
+       rule="VPP-4.3 RULE 6.1.3")
 def check_read_max_count():
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
@@ -173,7 +173,7 @@ def check_end_beats_count():
 
 
 @check("a reply larger than maxRecvSize is reassembled intact",
-       rule="VXI-11 B.6.4")
+       rule="VXI-11 RULE B.6.23")
 def check_large_reassembly():
     srv = server()
     size = 96 * 1024
@@ -190,7 +190,7 @@ def check_large_reassembly():
 # Error reporting
 # ---------------------------------------------------------------------------
 @check("an error 21 (invalid address) reply becomes a VISA error",
-       rule="VXI-11 B.5.2")
+       rule="VXI-11 §B.5.2")
 def check_error_21():
     srv = server()
     with open_inst() as inst:
@@ -208,7 +208,7 @@ def check_error_21():
 
 
 @check("a device-defined error code becomes a VISA error, not a crash",
-       rule="VXI-11 B.5.2")
+       rule="VXI-11 §B.5.2")
 def check_unknown_error_code():
     """B.5.2 reserves codes above 15 for device-defined errors.
 
@@ -231,7 +231,7 @@ def check_unknown_error_code():
         raise AssertionError("an unknown error code was not reported at all")
 
 
-@check("the session still works after an injected error", rule="VXI-11 B.6.6")
+@check("the session still works after an injected error")
 def check_recovery_after_error():
     srv = server()
     with open_inst() as inst:
@@ -292,7 +292,7 @@ def check_stale_reply():
 
 
 @check("a connection dropped mid-read is reported, not hung",
-       rule="VPP-4.3 3.2.2")
+       rule="VPP-4.3 §6.1.1")
 def check_connection_dropped():
     srv = server()
     with open_inst() as inst:
@@ -309,7 +309,7 @@ def check_connection_dropped():
         raise AssertionError("a connection dropped mid-read did not raise")
 
 
-@check("a maxRecvSize of zero does not wedge the session", rule="VXI-11 B.6.3")
+@check("a maxRecvSize of zero does not wedge the session", rule="VXI-11 RULE B.6.3")
 def check_zero_max_recv_size():
     """RULE B.6.3 requires maxRecvSize to be at least 1024.
 
@@ -337,7 +337,7 @@ def check_zero_max_recv_size():
 MIN_MAX_RECV_SIZE = 1024
 
 
-@check("a write larger than maxRecvSize is split", rule="VXI-11 B.6.5")
+@check("a write larger than maxRecvSize is split", rule="VXI-11 OBSERVATION B.6.5")
 def check_write_splitting():
     """The client divides a write exceeding maxRecvSize itself.
 
@@ -405,7 +405,7 @@ def check_write_splitting():
         srv.set_vxi11_faults()
 
 
-@check("opening a dead port fails cleanly", rule="VPP-4.3 3.1.1")
+@check("opening a dead port fails cleanly")
 def check_dead_port():
     # Bind and close, so the port is certainly nobody's.
     probe = socket.socket()
@@ -429,7 +429,7 @@ def check_dead_port():
     raise AssertionError("opening a dead port appeared to succeed")
 
 
-@check("a refused link is reported as a VISA open failure", rule="VXI-11 B.6.3")
+@check("a refused link is reported as a VISA open failure", rule="VXI-11 RULE B.6.5")
 def check_refused_link():
     srv = server()
     # Error 9 is "out of resources": what a server answers when it will not
@@ -455,7 +455,7 @@ def check_refused_link():
 # Locking
 # ---------------------------------------------------------------------------
 @check("viLock waits for the lock rather than failing at once",
-       rule="VPP-4.3 3.6.2.1")
+       rule="VPP-4.3 RULE 3.6.22")
 def check_lock_waits():
     with open_inst() as a, open_inst() as b:
         a.lock_excl(2000)
@@ -479,7 +479,7 @@ def check_lock_waits():
         return f"waited {waited:.2f}s for a lock released at 1.00s"
 
 
-@check("VI_ATTR_RSRC_LOCK_STATE reflects a held lock", rule="VPP-4.3 3.6.2.1")
+@check("VI_ATTR_RSRC_LOCK_STATE reflects a held lock", rule="VPP-4.3 RULE 3.6.24")
 def check_lock_state():
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
@@ -495,8 +495,7 @@ def check_lock_state():
         return f"read back {state!r} ({st!r})"
 
 
-@check("the session still works after a lock attempt failed",
-       rule="VPP-4.3 3.6.2.1")
+@check("the session still works after a lock attempt failed")
 def check_after_failed_lock():
     with open_inst() as a, open_inst() as b:
         a.lock_excl(2000)
@@ -515,7 +514,7 @@ def check_after_failed_lock():
 # Session behaviour
 # ---------------------------------------------------------------------------
 @check("a device that answers a read with nothing still times out",
-       rule="VPP-4.3 3.2.2")
+       rule="VPP-4.3 §6.1.1")
 def check_empty_read_times_out():
     with open_inst() as inst:
         inst.timeout = 1000
@@ -533,7 +532,7 @@ def check_empty_read_times_out():
         raise AssertionError("a read with nothing to read returned")
 
 
-@check("the session recovers from a read timeout", rule="VPP-4.3 3.2.2")
+@check("the session recovers from a read timeout")
 def check_recovery_after_timeout():
     with open_inst() as inst:
         inst.timeout = 800
@@ -549,7 +548,7 @@ def check_recovery_after_timeout():
         return f"the query after the timeout returned {reply!r}"
 
 
-@check("VI_ATTR_TCPIP_KEEPALIVE can be turned on", rule="VPP-4.3 3.5")
+@check("VI_ATTR_TCPIP_KEEPALIVE can be turned on")
 def check_keepalive():
     """`value is True` is not the same question as "is keepalive on".
 
@@ -579,7 +578,7 @@ def check_keepalive():
 
 
 @check("VI_ATTR_SEND_END_EN=False suppresses END on the write",
-       rule="VXI-11 B.5.3")
+       rule="VXI-11 §B.5.3")
 def check_send_end_flag():
     """The END operation flag, checked at the instrument rather than the API.
 
@@ -622,7 +621,7 @@ LINK_CYCLES = 80
 LINK_BUDGET_S = 45.0
 
 
-@check("closing the session destroys the link", rule="VXI-11 B.6.16",
+@check("closing the session destroys the link", rule="VXI-11 RULE B.6.9",
        watchdog=LINK_BUDGET_S + 20.0)
 def check_close_destroys_link():
     """Links are a finite server resource (B.6.5 caps them).

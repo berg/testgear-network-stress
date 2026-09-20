@@ -91,7 +91,7 @@ def SETUP(ctx):
             visa.check_errors(session, ctx["stats"], "at end of run")
 
 
-@check("repeated terminate/recover cycles all succeed", rule="VPP-4.3 3.2.3")
+@check("repeated terminate/recover cycles all succeed", rule="VPP-4.3 §3.5.1.1")
 def check_terminate_cycles():
     """Terminate a blocked read `--iterations` times, resynchronising between.
 

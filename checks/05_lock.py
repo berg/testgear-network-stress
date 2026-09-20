@@ -73,7 +73,7 @@ def SETUP(ctx):
 
 
 # -- 1. lock/unlock cycling on an idle channel -------------------------------
-@check("repeated exclusive lock/unlock cycles all succeed", rule="VPP-4.3 3.6.2.1")
+@check("repeated exclusive lock/unlock cycles all succeed", rule="VPP-4.3 §3.6.2.1")
 def check_exclusive_cycles():
     args, stats = CTX["args"], CTX["stats"]
     lib, sess = a()
@@ -93,7 +93,7 @@ def check_exclusive_cycles():
 
 # -- 2. shared locks ---------------------------------------------------------
 @check("repeated shared lock/unlock cycles all succeed",
-       rule="VPP-4.3 3.6.3, 3.6.5")
+       rule="VPP-4.3 RULE 3.6.3, RULE 3.6.5")
 def check_shared_cycles():
     """Refusing shared locks outright is a rule violation, not a preference.
 
@@ -135,7 +135,7 @@ def check_shared_cycles():
 
 
 # -- 3. lock state tracking --------------------------------------------------
-@check("VI_ATTR_RSRC_LOCK_STATE reads back as exclusive", rule="VPP-4.3 3.6.2.1")
+@check("VI_ATTR_RSRC_LOCK_STATE reads back as exclusive", rule="VPP-4.3 §3.6.2.1")
 def check_lock_state_exclusive():
     lib, sess = a()
     visa.status(lib.lock, sess, constants.Lock.exclusive, 2000, None)
@@ -145,7 +145,7 @@ def check_lock_state_exclusive():
     return detail
 
 
-@check("VI_ATTR_RSRC_LOCK_STATE clears on unlock", rule="VPP-4.3 3.6.2.1")
+@check("VI_ATTR_RSRC_LOCK_STATE clears on unlock", rule="VPP-4.3 §3.6.2.1")
 def check_lock_state_cleared():
     lib, sess = a()
     visa.status(lib.unlock, sess)
@@ -173,7 +173,7 @@ def check_a_locks():
     return f"got {st!r}"
 
 
-@check("session B is refused while A holds the lock", rule="VPP-4.3 3.6.2.1")
+@check("session B is refused while A holds the lock", rule="VPP-4.3 §3.6.2.1")
 def check_b_refused():
     """A server that acknowledges a lock and enforces nothing is a server
     limitation, not a client fault.
@@ -252,7 +252,7 @@ def check_a_shared_lock():
     return f"got {st!r}, key {key!r}"
 
 
-@check("session B joins the shared lock with A's key", rule="VPP-4.3 3.6.2.1")
+@check("session B joins the shared lock with A's key", rule="VPP-4.3 §3.6.2.1")
 def check_b_joins_shared_lock():
     if not shared_locks():
         raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")

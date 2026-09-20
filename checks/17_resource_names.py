@@ -43,7 +43,7 @@ def server():
 
 
 @check("viOpen matches the resource name case-insensitively",
-       rule="VPP-4.3 4.3.17")
+       rule="VPP-4.3 RULE 4.3.17")
 def check_open_case_insensitive():
     """4.3.17: viOpen SHALL use a case-insensitive compare.
 
@@ -72,7 +72,7 @@ def check_open_case_insensitive():
 
 
 @check("every component of the resource name is case-insensitive",
-       rule="VPP-4.3 4.3.17")
+       rule="VPP-4.3 RULE 4.3.17")
 def check_open_lowercase():
     """4.3.17 admits no exceptions, so this varies the components separately
     and names the one that fails.
@@ -112,7 +112,7 @@ def check_open_lowercase():
     return f"{len(variants)} case variants all accepted"
 
 
-@check("a 'hislip' device name selects HiSLIP", rule="VPP-4.3 4.3.6",
+@check("a 'hislip' device name selects HiSLIP", rule="VPP-4.3 RULE 4.3.6",
        protocols=("hislip",))
 def check_hislip_name_selects_hislip():
     """4.3.6: an alphanumeric device name starting with 'hislip' means connect
@@ -131,7 +131,7 @@ def check_hislip_name_selects_hislip():
         return f"VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
 
 
-@check("an 'inst' device name selects VXI-11", rule="VPP-4.3 4.3.7",
+@check("an 'inst' device name selects VXI-11", rule="VPP-4.3 RULE 4.3.7",
        protocols=("vxi11",))
 def check_inst_name_selects_vxi11():
     """4.3.7: 'vxi' for VXI-11.1, 'gpib' for VXI-11.2, 'inst' for VXI-11.3."""
@@ -149,7 +149,7 @@ def check_inst_name_selects_vxi11():
         return f"VI_ATTR_TCPIP_IS_HISLIP reads {value!r}"
 
 
-@check("an omitted device name connects over VXI-11", rule="VPP-4.3 4.3.8",
+@check("an omitted device name connects over VXI-11", rule="VPP-4.3 RULE 4.3.8",
        protocols=("vxi11",))
 def check_omitted_device_name():
     """4.3.8: with the device name omitted, an IPv4 host that supports VXI-11
@@ -184,7 +184,7 @@ def check_omitted_device_name():
     return short
 
 
-@check("a dotted IPv4 address is accepted as the host", rule="VPP-4.3 4.3.4")
+@check("a dotted IPv4 address is accepted as the host", rule="VPP-4.3 RULE 4.3.4")
 def check_ipv4_host():
     """4.3.4: an implementation SHALL support a hostname or a dot-delimited
     IPv4 address.
@@ -206,7 +206,7 @@ def check_ipv4_host():
 
 
 @check("viParseRsrc agrees with viOpen about the resource",
-       rule="VPP-4.3 4.3.20")
+       rule="VPP-4.3 RULE 4.3.20")
 def check_parse_matches_open():
     """4.3.20 requires viParseRsrc to match case-insensitively too, and the
     point of parsing is that it agrees with opening.

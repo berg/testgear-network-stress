@@ -120,7 +120,7 @@ def check_read_content():
     return f"got {got!r}"
 
 
-@check("a short read reports VI_SUCCESS_MAX_CNT", rule="VPP-4.3 RULE 6.1.2")
+@check("a short read reports VI_SUCCESS_MAX_CNT", rule="VPP-4.3 RULE 6.1.3")
 def check_short_read_status():
     """A read smaller than the message must report max-count and leave the
     rest readable -- the second half is the check after this one."""
@@ -132,7 +132,7 @@ def check_short_read_status():
     return f"got {st!r}"
 
 
-@check("the remainder of a short read is still available", rule="VPP-4.3 RULE 6.1.2")
+@check("the remainder of a short read is still available")
 def check_short_read_remainder():
     if "short_read" not in STATE:
         raise Skip("the short read did not complete, so there is no remainder")
@@ -173,7 +173,7 @@ def check_assert_trigger():
         visa.check_errors(inst(), CTX["stats"], "after assert_trigger")
 
 
-@check("a non-default trigger protocol is refused cleanly", rule="VPP-4.3 6.1.7")
+@check("a non-default trigger protocol is refused cleanly", rule="VPP-4.3 §6.1.7")
 def check_non_default_trigger_protocol():
     """VPP-4.3 6.1.7 lists VI_ERROR_INV_PROT among viAssertTrigger's error
     codes, so refusing a protocol the transport cannot perform is available
@@ -223,7 +223,7 @@ def check_usable_after_clear():
 
 
 # -- locking -----------------------------------------------------------------
-@check("viLock takes an exclusive lock", rule="VPP-4.3 3.6.2.1")
+@check("viLock takes an exclusive lock", rule="VPP-4.3 §3.6.2.1")
 def check_exclusive_lock():
     lib, sess = io()
     key, st = visa.call(lib.lock, sess, constants.Lock.exclusive, 2000, None)
@@ -253,7 +253,7 @@ def check_exclusive_lock_key():
     return f"got {key!r}"
 
 
-@check("VI_ATTR_RSRC_LOCK_STATE reports the exclusive lock", rule="VPP-4.3 3.6.2.1")
+@check("VI_ATTR_RSRC_LOCK_STATE reports the exclusive lock", rule="VPP-4.3 RULE 3.6.24")
 def check_lock_state_attribute():
     """Read through `visa.call`, so a backend that does not implement the
     attribute at all is a failed check rather than a dead run. Upstream
@@ -274,7 +274,7 @@ def check_unlock_status():
     return f"got {st!r}"
 
 
-@check("VI_ATTR_RSRC_LOCK_STATE is clear after unlock", rule="VPP-4.3 3.6.2.1")
+@check("VI_ATTR_RSRC_LOCK_STATE is clear after unlock", rule="VPP-4.3 RULE 3.6.36")
 def check_lock_state_cleared():
     lib, sess = io()
     state, st = visa.call(lib.get_attribute, sess, RA.resource_lock_state)
@@ -301,7 +301,7 @@ def check_shared_lock():
     return f"got {st!r}"
 
 
-@check("a shared lock returns its access key", rule="VPP-4.3 3.6.2.1",
+@check("a shared lock returns its access key", rule="VPP-4.3 RULE 3.6.18",
        protocols=("hislip",))
 def check_shared_lock_key():
     """HiSLIP only, and registered that way rather than skipped: VXI-11 has no
@@ -446,7 +446,7 @@ def check_throughput_after_ren():
 
 
 # -- flush -------------------------------------------------------------------
-@check("viFlush reports a VISA status", rule="VPP-4.3 3.2.4")
+@check("viFlush reports a VISA status", rule="VPP-4.3 §3.1.2")
 def check_flush():
     """An unsupported operation must report VI_ERROR_NSUP_OPER, not raise out
     of the library: a caller cannot catch what it has no reason to expect, and
@@ -518,7 +518,7 @@ def _register_attribute_checks() -> None:
             add(
                 _attribute_readable(name, expected),
                 f"{name} is readable",
-                rule="VPP-4.3 5.1.12",
+                rule="VPP-4.3 RULE 5.1.12",
                 protocols=protocols,
             )
 

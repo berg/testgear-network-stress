@@ -77,7 +77,7 @@ def SETUP(ctx):
 
 
 # -- 1. queued delivery, repeatedly ------------------------------------------
-@check("SRQ events can be enabled for queued delivery", rule="VPP-4.3 3.7.6")
+@check("SRQ events can be enabled for queued delivery")
 def check_enable_queued():
     """Enabling the event is itself a check.
 
@@ -94,7 +94,7 @@ def check_enable_queued():
     )
 
 
-@check("every queued service request is delivered", rule="VPP-4.3 3.4.1",
+@check("every queued service request is delivered",
        watchdog=DELIVERY_WATCHDOG)
 def check_queued_delivery():
     if not STATE.get("queued_ok"):
@@ -201,7 +201,7 @@ def handler_load() -> dict:
     return result
 
 
-@check("SRQ events can be enabled for handler delivery", rule="VPP-4.3 3.7.6",
+@check("SRQ events can be enabled for handler delivery",
        watchdog=HANDLER_WATCHDOG)
 def check_enable_handler():
     result = handler_run()
@@ -235,7 +235,7 @@ def check_read_stb_in_handler():
     return detail
 
 
-@check("every handler saw a real status byte", rule="VPP-4.3 3.4.1",
+@check("every handler saw a real status byte", rule="VPP-4.3 §6.1.8",
        watchdog=HANDLER_WATCHDOG)
 def check_handler_status_bytes():
     """A status byte is one byte: that is the claim.
@@ -266,8 +266,7 @@ def check_handler_status_bytes():
 
 
 # -- 3. SRQs racing against concurrent status queries ------------------------
-@check("SRQ events can be re-enabled after handler delivery",
-       rule="VPP-4.3 3.7.6")
+@check("SRQ events can be re-enabled after handler delivery")
 def check_reenable_queue():
     CTX["session"].enable_event(visa.SRQ, visa.QUEUE)
     STATE["race_ok"] = True
@@ -277,7 +276,7 @@ def check_reenable_queue():
     )
 
 
-@check("status queries stayed intact while SRQs fired", rule="VPP-4.3 3.3.1",
+@check("status queries stayed intact while SRQs fired", rule="VPP-4.3 §6.1.8",
        watchdog=RACE_WATCHDOG)
 def check_status_queries_intact():
     """The interleaving that used to corrupt a response: a service request

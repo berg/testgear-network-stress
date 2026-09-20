@@ -52,7 +52,7 @@ def calls(srv, proc: int) -> list[dict]:
 
 
 @check("device_write sets the END flag on a terminated write",
-       rule="VXI-11 B.6.14")
+       rule="VXI-11 RULE B.6.14")
 def check_write_end_flag():
     """B.6.14: with the end flag set, an END indicator accompanies the last
     byte. A client that never sets it leaves the instrument waiting for a
@@ -71,7 +71,7 @@ def check_write_end_flag():
         return f"flags={writes[-1]['flags']:#06x}"
 
 
-@check("clearing VI_ATTR_SEND_END_EN clears the END flag", rule="VXI-11 B.5.3")
+@check("clearing VI_ATTR_SEND_END_EN clears the END flag", rule="VXI-11 §B.5.3")
 def check_write_end_flag_cleared():
     """The other half: the attribute has to reach the wire, not just be stored.
 
@@ -98,7 +98,7 @@ def check_write_end_flag_cleared():
 
 
 @check("VI_ATTR_TERMCHAR_EN becomes termchrset, carrying the character",
-       rule="VXI-11 B.5.3")
+       rule="VXI-11 §B.5.3")
 def check_read_termchrset():
     """B.5.3: termchrset is set when a termination character is specified on a
     read, and the character itself travels in termChar.
@@ -130,7 +130,7 @@ def check_read_termchrset():
 
 
 @check("termchrset is clear when no termination character is set",
-       rule="VXI-11 B.5.3")
+       rule="VXI-11 §B.5.3")
 def check_read_termchrset_cleared():
     srv = server()
     with open_inst() as inst:
@@ -146,7 +146,7 @@ def check_read_termchrset_cleared():
         return f"flags={reads[-1]['flags']:#06x}"
 
 
-@check("reserved flag bits are sent as zero", rule="VXI-11 B.5.3")
+@check("reserved flag bits are sent as zero", rule="VXI-11 §B.5.3")
 def check_reserved_bits_zero():
     """B.5.3: "Controllers send undefined bits as zero (0)."
 
@@ -169,7 +169,7 @@ def check_reserved_bits_zero():
         return f"{len(seen)} calls, all reserved bits clear"
 
 
-@check("the session timeout is what reaches io_timeout", rule="VXI-11 B.5.4")
+@check("the session timeout is what reaches io_timeout", rule="VXI-11 §B.5.4")
 def check_io_timeout_matches():
     """B.5.4 makes io_timeout the client's statement of how long the server
     may take. If the session's VI_ATTR_TMO_VALUE does not reach it, the
@@ -194,7 +194,7 @@ def check_io_timeout_matches():
         return f"io_timeout={wanted}ms on {len(seen)} calls"
 
 
-@check("a read asks for no more than the chunk size", rule="VXI-11 B.6.22")
+@check("a read asks for no more than the chunk size", rule="VXI-11 RULE B.6.23")
 def check_request_size():
     """B.6.22 has the server return at most requestSize bytes.
 

@@ -100,7 +100,7 @@ def missing(inst, required) -> list[str]:
 
 
 @check("VI_ATTR_TRIG_ID is absent everywhere, as RULE 5.1.11 does not anticipate",
-       rule="VPP-4.3 5.1.11")
+       rule="VPP-4.3 RULE 5.1.11")
 def check_trig_id_universally_absent():
     """A rule no implementation satisfies, recorded rather than prosecuted.
 
@@ -123,7 +123,7 @@ def check_trig_id_universally_absent():
 
 
 @check("every other attribute RULE 5.1.11 requires of an INSTR session is present",
-       rule="VPP-4.3 5.1.11")
+       rule="VPP-4.3 RULE 5.1.11")
 def check_all_instr_attributes():
     with open_inst() as inst:
         absent = missing(inst, ALL_INSTR)
@@ -135,7 +135,7 @@ def check_all_instr_attributes():
 
 
 @check("every attribute RULE 5.1.12 requires of a message-based session is present",
-       rule="VPP-4.3 5.1.12")
+       rule="VPP-4.3 RULE 5.1.12")
 def check_message_based_attributes():
     """5.1.12 names TCPIP explicitly, so this applies to both transports."""
     with open_inst() as inst:
@@ -148,7 +148,7 @@ def check_message_based_attributes():
 
 
 @check("every attribute RULE 5.1.16 requires of a TCPIP INSTR session is present",
-       rule="VPP-4.3 5.1.16")
+       rule="VPP-4.3 RULE 5.1.16")
 def check_tcpip_attributes():
     with open_inst() as inst:
         absent = missing(inst, TCPIP_INSTR)
@@ -160,7 +160,7 @@ def check_tcpip_attributes():
 
 
 @check("every attribute RULE 5.1.17 requires of a HiSLIP session is present",
-       rule="VPP-4.3 5.1.17", protocols=("hislip",))
+       rule="VPP-4.3 RULE 5.1.17", protocols=("hislip",))
 def check_hislip_attributes():
     """5.1.17 binds "a HiSLIP TCPIP system", so it does not apply to VXI-11.
 
@@ -178,7 +178,7 @@ def check_hislip_attributes():
 
 
 @check("VI_ATTR_TCPIP_IS_HISLIP tells the truth about the transport",
-       rule="VPP-4.3 5.1.29")
+       rule="VPP-4.3 RULE 5.1.29")
 def check_is_hislip_correct():
     """5.1.29 and 5.1.30 tie the protocol to the device name: `inst`/`gpib`
     means VXI-11, `hislip` means HiSLIP.
@@ -208,7 +208,7 @@ def check_is_hislip_correct():
         )
 
 
-@check("the service request event is supported", rule="VPP-4.3 5.1.54")
+@check("the service request event is supported", rule="VPP-4.3 RULE 5.1.54")
 def check_srq_event_supported():
     """5.1.54: a TCPIP INSTR resource SHALL support generating
     VI_EVENT_SERVICE_REQ.
@@ -227,7 +227,7 @@ def check_srq_event_supported():
         return f"viEnableEvent(VI_EVENT_SERVICE_REQ) returned {st!r}"
 
 
-@check("VI_ATTR_INTF_TYPE reports TCPIP", rule="VPP-4.3 5.1.11")
+@check("VI_ATTR_INTF_TYPE reports TCPIP", rule="VPP-4.3 RULE 5.1.11")
 def check_interface_type():
     """The value behind 5.1.11's first attribute.
 

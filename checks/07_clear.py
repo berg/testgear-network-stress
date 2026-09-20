@@ -120,7 +120,7 @@ def SETUP(ctx):
             visa.check_errors(session, ctx["stats"], "at end of run")
 
 
-@check("repeated clear/query cycles all succeed", rule="VPP-4.3 3.2.3")
+@check("repeated clear/query cycles all succeed", rule="VPP-4.3 RULE 5.1.8")
 def check_clear_cycles():
     """Clear an idle session over and over, querying between each."""
     args, stats = CTX["args"], CTX["stats"]
@@ -135,7 +135,7 @@ def check_clear_cycles():
     return f"{args.iterations} cycles"
 
 
-@check("clear discards an uncollected response", rule="VPP-4.3 3.2.3")
+@check("clear discards an uncollected response", rule="VPP-4.3 RULE 5.1.8")
 def check_clear_discards_response():
     """The instrument has queued a response nobody collected; the clear must
     throw it away rather than leave it to corrupt the next read.
@@ -186,7 +186,7 @@ def check_clear_discards_response():
     return f"{cycles()} cycles, each abandoning a {probe} response"
 
 
-@check("clear resyncs mid-message", rule="VPP-4.3 3.2.3")
+@check("clear resyncs mid-message", rule="VPP-4.3 RULE 5.1.8")
 def check_clear_mid_message():
     """Clear part-way through reading a large response."""
     if not STATE["big_query"]:

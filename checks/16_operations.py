@@ -52,7 +52,7 @@ def server():
 
 
 @check("every operation RULE 5.1.72 requires is present and answers",
-       rule="VPP-4.3 5.1.72")
+       rule="VPP-4.3 RULE 5.1.72")
 def check_required_operations():
     """5.1.72 lists the operations a TCPIP INSTR resource SHALL support.
 
@@ -72,7 +72,7 @@ def check_required_operations():
 
 
 @check("no required operation raises instead of returning a status",
-       rule="VPP-4.3 5.1.72")
+       rule="VPP-4.3 RULE 5.1.72")
 def check_operations_return_status():
     """The half that matters more than presence.
 
@@ -119,7 +119,7 @@ def check_operations_return_status():
 
 
 @check("viRead does not report VI_SUCCESS while SUPPRESS_END_EN is set",
-       rule="VPP-4.3 6.1.4")
+       rule="VPP-4.3 RULE 6.1.4")
 def check_suppress_end_forbids_success():
     """6.1.4 is a prohibition: with END suppressed, plain VI_SUCCESS is not an
     available answer, because VI_SUCCESS is precisely the status that means
@@ -154,7 +154,7 @@ def check_suppress_end_forbids_success():
 
 
 @check("viRead does not report VI_SUCCESS_TERM_CHAR while termchar is off",
-       rule="VPP-4.3 6.1.5")
+       rule="VPP-4.3 RULE 6.1.5")
 def check_termchar_off_forbids_term_char_status():
     """6.1.5, the mirror image: with no termination character enabled, the
     status that means "a termination character ended this read" cannot be
@@ -173,7 +173,7 @@ def check_termchar_off_forbids_term_char_status():
         return f"{st!r}"
 
 
-@check("viClear discards an uncollected response", rule="VPP-4.3 5.1.8")
+@check("viClear discards an uncollected response", rule="VPP-4.3 RULE 5.1.8")
 def check_clear_flushes_buffers():
     """5.1.8: viClear flushes the read buffer and discards the write buffers.
 
@@ -197,7 +197,7 @@ def check_clear_flushes_buffers():
 
 
 @check("the four REN modes RULE 6.5.6 requires of TCPIP are supported",
-       rule="VPP-4.3 6.5.6")
+       rule="VPP-4.3 RULE 6.5.6")
 def check_required_ren_modes():
     """6.5.6 names them exactly: DEASSERT_GTL, ASSERT_ADDRESS,
     ASSERT_ADDRESS_LLO and ADDRESS_GTL.
@@ -240,7 +240,7 @@ def check_required_ren_modes():
 
 
 @check("viFlush on an empty buffer does nothing rather than failing",
-       rule="VPP-4.3 6.2.5")
+       rule="VPP-4.3 RULE 6.2.5")
 def check_flush_empty_buffer():
     """6.2.5: flushing an empty buffer performs no action on it.
 
@@ -268,7 +268,7 @@ def check_flush_empty_buffer():
 
 
 @check("VI_ATTR_USER_DATA agrees with its width-specific twin",
-       rule="VPP-4.3 3.2.8")
+       rule="VPP-4.3 RULE 3.2.8")
 def check_user_data_consistency():
     """3.2.7 and 3.2.8: on a 32-bit framework VI_ATTR_USER_DATA equals
     VI_ATTR_USER_DATA_32, and on a 64-bit one it equals VI_ATTR_USER_DATA_64.

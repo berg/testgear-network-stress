@@ -293,7 +293,7 @@ def _register_parallel_check() -> None:
     add(
         _parallel_sessions,
         "parallel sessions to one instrument do not interfere",
-        rule="VPP-4.3 3.1.3",
+        rule="VPP-4.3 RULE 3.6.1",
         protocols=("hislip",),
         watchdog=PARALLEL_WATCHDOG,
     )
@@ -301,7 +301,7 @@ def _register_parallel_check() -> None:
         _parallel_sessions,
         "parallel sessions to one instrument do not interfere "
         "(locked, as VXI-11 requires)",
-        rule="VPP-4.3 3.1.3",
+        rule="VPP-4.3 RULE 3.6.1",
         protocols=("vxi11",),
         watchdog=PARALLEL_WATCHDOG,
     )

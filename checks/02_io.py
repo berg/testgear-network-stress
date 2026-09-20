@@ -207,7 +207,7 @@ def _register_chunk_checks() -> None:
         add(
             _chunk_intact(chunk),
             f"a large message read {chunk}B at a time is intact",
-            rule="VPP-4.3 RULE 6.1.2",
+            rule="VPP-4.3 RULE 6.1.3",
             watchdog=CHUNK_WATCHDOG,
         )
         add(
@@ -308,7 +308,7 @@ def check_multiline_split():
 
 # -- 5. send-end disabled ----------------------------------------------------
 @check("a message split across an unterminated and a terminated write is "
-       "reassembled by the instrument", rule="VPP-4.3 3.2.1")
+       "reassembled by the instrument")
 def check_split_write():
     """With END suppressed the message goes out unterminated, so the
     instrument should not answer until a terminated message follows."""

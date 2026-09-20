@@ -39,7 +39,7 @@ def open_inst(**kwargs):
     )
 
 
-@check("VI_ATTR_RSRC_SPEC_VERSION is readable", rule="VPP-4.3 3.2.3")
+@check("VI_ATTR_RSRC_SPEC_VERSION is readable", rule="VPP-4.3 RULE 3.2.3")
 def check_spec_version():
     """3.2.3 fixes the value at 00700200h for *this* revision of VPP-4.3.
 
@@ -71,7 +71,7 @@ def check_spec_version():
 
 
 @check("VI_ATTR_MAX_QUEUE_LENGTH is writeable before viEnableEvent",
-       rule="VPP-4.3 3.2.5")
+       rule="VPP-4.3 RULE 3.2.5")
 def check_queue_length_writeable():
     """3.2.5: read/write until the first viEnableEvent on that session.
 
@@ -94,7 +94,7 @@ def check_queue_length_writeable():
 
 
 @check("VI_ATTR_MAX_QUEUE_LENGTH is read-only after viEnableEvent",
-       rule="VPP-4.3 3.2.6")
+       rule="VPP-4.3 RULE 3.2.6")
 def check_queue_length_readonly():
     """3.2.6: read-only once the queue is in use.
 
@@ -131,7 +131,7 @@ def check_queue_length_readonly():
                 inst.disable_event(visa.SRQ, visa.QUEUE)
 
 
-@check("viClose(VI_NULL) returns VI_WARN_NULL_OBJECT", rule="VPP-4.3 3.3.2")
+@check("viClose(VI_NULL) returns VI_WARN_NULL_OBJECT", rule="VPP-4.3 RULE 3.3.2")
 def check_close_null():
     """3.3.2: closing VI_NULL is a warning, not an error and not a crash.
 
@@ -150,7 +150,7 @@ def check_close_null():
 
 
 @check("a string attribute reads back within 256 characters",
-       rule="VPP-4.3 3.4.1")
+       rule="VPP-4.3 RULE 3.4.1")
 def check_string_attribute_length():
     """3.4.1 caps a string attribute at 256 characters including the null.
 
@@ -170,8 +170,7 @@ def check_string_attribute_length():
         return f"{len(text)} characters"
 
 
-@check("an out-of-range attribute state is not stored verbatim",
-       rule="VPP-4.3 3.4.2")
+@check("an out-of-range attribute state is not stored verbatim")
 def check_unsupported_attribute_state():
     """3.4.2 says a state the resource cannot honour returns
     VI_ERROR_NSUP_ATTR_STATE. In practice *no* implementation refuses here:
@@ -203,8 +202,7 @@ def check_unsupported_attribute_state():
         return f"accepted and masked to {value:#04x}"
 
 
-@check("the resource name reads back as something that reopens",
-       rule="VPP-4.3 3.4.1")
+@check("the resource name reads back as something that reopens")
 def check_resource_name_roundtrip():
     """VI_ATTR_RSRC_NAME is documented as the canonical name of the resource.
 

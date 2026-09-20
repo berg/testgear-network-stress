@@ -90,7 +90,7 @@ def server():
 # ---------------------------------------------------------------------------
 # I/O and status
 # ---------------------------------------------------------------------------
-@check("a query returns the instrument's reply", rule="VPP-4.3 3.2.1")
+@check("a query returns the instrument's reply")
 def check_query():
     with open_inst() as inst:
         reply = inst.query("*IDN?").strip()
@@ -98,7 +98,7 @@ def check_query():
         return reply
 
 
-@check("a second query on the same session still works", rule="VPP-4.3 3.2.1")
+@check("a second query on the same session still works")
 def check_two_queries():
     with open_inst() as inst:
         first = inst.query("*IDN?").strip()
@@ -139,7 +139,7 @@ def check_exact_chunk_boundary():
         return f"{chunk}-byte boundary, {elapsed * 1000:.0f}ms"
 
 
-@check("a large reply is reassembled across chunks", rule="VPP-4.3 RULE 6.1.2")
+@check("a large reply is reassembled across chunks", rule="VPP-4.3 RULE 6.1.3")
 def check_large_reply():
     srv = server()
     size = 64 * 1024
@@ -154,7 +154,7 @@ def check_large_reply():
         return f"{size} bytes"
 
 
-@check("a reply split across many TCP segments is reassembled", rule="VPP-4.3 RULE 6.1.2")
+@check("a reply split across many TCP segments is reassembled", rule="VPP-4.3 RULE 6.1.3")
 def check_dribbled_reply():
     """injected: one byte per segment.
 
@@ -189,7 +189,7 @@ def check_dribbled_reply():
         return f"200 segments in {dribbled * 1000:.0f}ms vs {plain * 1000:.0f}ms"
 
 
-@check("read_stb reports the status byte", rule="VPP-4.3 3.3.1",
+@check("read_stb reports the status byte", rule="VPP-4.3 §6.1.8",
        protocols=("vxi11",))
 def check_read_stb():
     """VXI-11 only, for the same reason as the silent-read check.
@@ -219,7 +219,7 @@ def check_read_stb():
 # ---------------------------------------------------------------------------
 # Error reporting
 # ---------------------------------------------------------------------------
-@check("a read with nothing to read reports a timeout", rule="VPP-4.3 3.2.2",
+@check("a read with nothing to read reports a timeout", rule="VPP-4.3 §6.1.1",
        protocols=("vxi11",))
 def check_read_timeout():
     """VXI-11 only, and the asymmetry is the server's, not the client's.
@@ -256,7 +256,7 @@ def check_read_timeout():
         raise AssertionError("a read with nothing to read returned instead of timing out")
 
 
-@check("a connection lost mid-reply is reported, not hung", rule="VPP-4.3 3.2.2")
+@check("a connection lost mid-reply is reported, not hung", rule="VPP-4.3 §6.1.1")
 def check_connection_dropped():
     """injected: the server closes the socket partway through a reply."""
     srv = server()
@@ -285,7 +285,7 @@ def check_connection_dropped():
         )
 
 
-@check("a stalled connection times out rather than hanging", rule="VPP-4.3 3.2.2")
+@check("a stalled connection times out rather than hanging", rule="VPP-4.3 §6.1.1")
 def check_stalled_connection():
     """injected: bytes stop arriving, socket stays open.
 
@@ -315,7 +315,7 @@ def check_stalled_connection():
         raise AssertionError("a stalled read returned instead of timing out")
 
 
-@check("the session recovers after a timeout", rule="VPP-4.3 3.2.2")
+@check("the session recovers after a timeout")
 def check_recovery_after_timeout():
     with open_inst() as inst:
         inst.timeout = 800
@@ -337,7 +337,7 @@ def check_recovery_after_timeout():
 # ---------------------------------------------------------------------------
 # Session behaviour
 # ---------------------------------------------------------------------------
-@check("two sessions to the same instrument are independent", rule="VPP-4.3 3.1.3")
+@check("two sessions to the same instrument are independent", rule="VPP-4.3 RULE 3.6.1")
 def check_parallel_sessions():
     with open_inst() as first, open_inst() as second:
         a = first.query("*IDN?").strip()
@@ -346,7 +346,7 @@ def check_parallel_sessions():
         return f"both sessions returned {a!r}"
 
 
-@check("a closed session does not disturb the others", rule="VPP-4.3 3.1.3")
+@check("a closed session does not disturb the others", rule="VPP-4.3 RULE 3.6.1")
 def check_close_isolation():
     with open_inst() as keep:
         with open_inst() as temporary:
@@ -360,7 +360,7 @@ def check_close_isolation():
 
 
 @check("concurrent queries on separate sessions stay in step",
-       rule="VPP-4.3 3.1.3", protocols=("hislip",))
+       rule="VPP-4.3 RULE 3.6.1", protocols=("hislip",))
 def check_concurrent_sessions():
     """A status query racing a write is how the _rmt data race presented.
 
@@ -406,7 +406,7 @@ def check_concurrent_sessions():
     return "4 sessions x 20 query+poll cycles"
 
 
-@check("a lock serialises concurrent sessions", rule="VPP-4.3 3.6.2.1")
+@check("a lock serialises concurrent sessions", rule="VPP-4.3 RULE 3.6.4")
 def check_locked_concurrency():
     """What VXI-11 guarantees where the unlocked case cannot.
 
@@ -463,7 +463,7 @@ def _code(entry: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-@check("the client sent exactly the traffic the API implies", rule="VPP-4.3 3.2.1")
+@check("the client sent exactly the traffic the API implies")
 def check_observed_traffic():
     """What the client actually put on the bus, not just what came back.
 

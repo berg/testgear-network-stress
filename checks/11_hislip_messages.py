@@ -56,7 +56,7 @@ def client_ids(srv) -> list[int]:
     ]
 
 
-@check("the client's MessageID starts at 0xFFFFFF00", rule="IVI-6.1 3.1.2")
+@check("the client's MessageID starts at 0xFFFFFF00", rule="IVI-6.1 §3.1.2")
 def check_initial_message_id():
     """3.1.2: "Clients shall maintain a MessageID count that is initially set
     to 0xffff ff00"."""
@@ -73,7 +73,7 @@ def check_initial_message_id():
         return f"{ids[0]:#010x}"
 
 
-@check("the MessageID advances by two per message", rule="IVI-6.1 3.1.2")
+@check("the MessageID advances by two per message", rule="IVI-6.1 §3.1.2")
 def check_message_id_step():
     """3.1.2: incremented "by two in an unsigned 32-bit sense (permitting
     wrap-around)".
@@ -99,7 +99,7 @@ def check_message_id_step():
         return f"{ids[0]:#010x} then +{MESSAGE_ID_STEP} x {len(steps)}"
 
 
-@check("a DataEND with the wrong MessageID is discarded", rule="IVI-6.1 3.1.2")
+@check("a DataEND with the wrong MessageID is discarded", rule="IVI-6.1 §3.1.2")
 def check_data_end_id_mismatch():
     """3.1.2 rule 1: verify the MessageID on a DataEND against the one last
     sent; if they differ, clear buffered Data responses and discard it.
@@ -130,7 +130,7 @@ def check_data_end_id_mismatch():
 
 
 @check("a reply arriving as Data then DataEND is reassembled",
-       rule="IVI-6.1 3.1.1")
+       rule="IVI-6.1 §3.1.1")
 def check_chunked_reply():
     """The positive control for the chunked path, and until now untested.
 
@@ -162,7 +162,7 @@ def check_chunked_reply():
 
 
 @check("a mis-addressed Data chunk is dropped, not delivered",
-       rule="IVI-6.1 3.1.2")
+       rule="IVI-6.1 §3.1.2")
 def check_data_id_mismatch():
     """3.1.2 rule 2, read carefully.
 
@@ -221,7 +221,7 @@ def check_data_id_mismatch():
         return f"{len(reply)}B delivered, the {cut}B mis-addressed chunk dropped"
 
 
-@check("the session recovers after a discarded message", rule="IVI-6.1 3.1.2")
+@check("the session recovers after a discarded message", rule="IVI-6.1 §3.1.2")
 def check_recovery_after_mismatch():
     """Discarding is only half of rule 1; the session has to remain usable.
 
@@ -252,7 +252,7 @@ def check_recovery_after_mismatch():
 
 
 @check("the MessageID resets to 0xFFFFFF00 after a device clear",
-       rule="IVI-6.1 3.1.2")
+       rule="IVI-6.1 §3.1.2")
 def check_message_id_reset_on_clear():
     """3.1.2, and step 8 of the device-clear procedure: "The MessageID is
     reset to 0xffff ff00 after device clear, and when the connection is
@@ -289,7 +289,7 @@ def check_message_id_reset_on_clear():
         return f"{before[-1]:#010x} -> clear -> {after[0]:#010x}"
 
 
-@check("the client reports whether overlap mode is in use", rule="IVI-6.1 2.7")
+@check("the client reports whether overlap mode is in use", rule="IVI-6.1 §3")
 def check_overlap_mode_attribute():
     """2.7: "All HiSLIP clients shall support both synchronized and overlapped
     mode."
@@ -313,7 +313,7 @@ def check_overlap_mode_attribute():
         return f"overlap_en={value!r}"
 
 
-@check("every client message carries the HS prologue", rule="IVI-6.1 2.3")
+@check("every client message carries the HS prologue", rule="IVI-6.1 §2.3")
 def check_prologue():
     """2.3: the prologue "shall be ASCII 'HS'".
 

@@ -64,7 +64,7 @@ def lock_state(inst) -> tuple:
 # Lock counting and nesting
 # ---------------------------------------------------------------------------
 @check("a nested exclusive lock reports VI_SUCCESS_NESTED_EXCLUSIVE",
-       rule="VPP-4.3 3.6.28")
+       rule="VPP-4.3 RULE 3.6.28")
 def check_exclusive_nesting():
     """3.6.28: locking exclusive again with a non-zero count returns
     VI_SUCCESS_NESTED_EXCLUSIVE -- a completion code, not an error.
@@ -98,7 +98,7 @@ def check_exclusive_nesting():
 
 
 @check("the unlock that leaves a lock still held reports the nesting",
-       rule="VPP-4.3 3.6.32")
+       rule="VPP-4.3 RULE 3.6.32")
 def check_unlock_reports_nesting():
     """3.6.32: unlocking while the exclusive count is still non-zero returns
     VI_SUCCESS_NESTED_EXCLUSIVE, so the caller can tell "released" from
@@ -124,7 +124,7 @@ def check_unlock_reports_nesting():
 
 
 @check("a nested shared lock reports VI_SUCCESS_NESTED_SHARED",
-       rule="VPP-4.3 3.6.29")
+       rule="VPP-4.3 RULE 3.6.30")
 def check_shared_nesting():
     """3.6.29, the shared-lock counterpart of 3.6.28."""
     if not shared_locks_supported():
@@ -147,7 +147,7 @@ def check_shared_nesting():
         return f"the second shared lock returned {second!r}"
 
 
-@check("one unlock of two does not release the resource", rule="VPP-4.3 3.6.10")
+@check("one unlock of two does not release the resource", rule="VPP-4.3 RULE 3.6.34, RULE 3.6.36")
 def check_nesting_holds_resource():
     """The consequence, rather than the completion code.
 
@@ -189,7 +189,7 @@ def check_nesting_holds_resource():
         )
 
 
-@check("a shared re-lock with the wrong key is refused", rule="VPP-4.3 3.6.31")
+@check("a shared re-lock with the wrong key is refused", rule="VPP-4.3 RULE 3.6.31")
 def check_shared_wrong_key():
     """3.6.31: re-locking shared with a key that is not the resource's access
     key returns VI_ERROR_INV_ACCESS_KEY -- not a second lock, and not silence.
@@ -215,7 +215,7 @@ def check_shared_wrong_key():
         return f"re-locking with the wrong key returned {second!r}"
 
 
-@check("the unlock after the last one is refused", rule="VPP-4.3 3.6.10")
+@check("the unlock after the last one is refused", rule="VPP-4.3 RULE 3.6.38")
 def check_unlock_underflow():
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
@@ -229,7 +229,7 @@ def check_unlock_underflow():
         return f"the unlock after the last one returned {st!r}"
 
 
-@check("a shared lock taken twice returns the same key", rule="VPP-4.3 3.6.20")
+@check("a shared lock taken twice returns the same key", rule="VPP-4.3 RULE 3.6.20")
 def check_shared_key_stable():
     """3.6.20: re-locking shared from the same session returns the same key."""
     if not shared_locks_supported():
@@ -260,7 +260,7 @@ def check_shared_key_stable():
 # ---------------------------------------------------------------------------
 # What the parameters mean
 # ---------------------------------------------------------------------------
-@check("an exclusive lock ignores the requested key", rule="VPP-4.3 3.6.13")
+@check("an exclusive lock ignores the requested key", rule="VPP-4.3 RULE 3.6.13")
 def check_exclusive_ignores_key():
     """3.6.13 says the key is ignored; 3.6.14 says the returned key is a
     zero-length string. NI and R&S return a generated key anyway, which is
@@ -279,7 +279,7 @@ def check_exclusive_ignores_key():
         return f"granted, key came back as {key!r}"
 
 
-@check("an over-long shared key is refused, not truncated", rule="VPP-4.3 3.6.17")
+@check("an over-long shared key is refused, not truncated", rule="VPP-4.3 RULE 3.6.17")
 def check_long_key_refused():
     """3.6.17: a requestedKey of 256 characters or more is an error.
 
@@ -304,7 +304,7 @@ def check_long_key_refused():
         return f"refused with {st!r}"
 
 
-@check("VI_TMO_IMMEDIATE gives up at once", rule="VPP-4.3 3.6.23")
+@check("VI_TMO_IMMEDIATE gives up at once", rule="VPP-4.3 RULE 3.6.23")
 def check_immediate_timeout():
     """3.6.23: with VI_TMO_IMMEDIATE a lock that cannot be had returns at once.
 
@@ -339,7 +339,7 @@ def check_immediate_timeout():
             visa.status(a.visalib.unlock, a.session)
 
 
-@check("viLock waits at least its timeout before failing", rule="VPP-4.3 3.6.22")
+@check("viLock waits at least its timeout before failing", rule="VPP-4.3 RULE 3.6.22")
 def check_lock_waits_full_timeout():
     """3.6.22: the operation waits *at least* the timeout before erroring.
 
@@ -372,7 +372,7 @@ def check_lock_waits_full_timeout():
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
-@check("closing a session releases the locks it held", rule="VPP-4.3 3.6.21")
+@check("closing a session releases the locks it held", rule="VPP-4.3 RULE 3.6.21")
 def check_close_releases_locks():
     """3.6.21: closing a session sets both lock counts to zero.
 
@@ -404,7 +404,7 @@ def check_close_releases_locks():
         return f"another session locked after the holder closed ({st!r})"
 
 
-@check("a lock dies with the connection that held it", rule="VXI-11 B.6.77",
+@check("a lock dies with the connection that held it", rule="VXI-11 RULE B.6.77",
        protocols=("vxi11",))
 def check_lock_dies_with_connection():
     """B.6.77: locks are tied to the core channel.

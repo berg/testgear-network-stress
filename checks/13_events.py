@@ -50,7 +50,7 @@ def quiet(inst) -> None:
 
 
 @check("viEnableEvent with VI_HNDLR and no handler is refused",
-       rule="VPP-4.3 3.7.6")
+       rule="VPP-4.3 RULE 3.7.6")
 def check_enable_handler_without_handler():
     """3.7.6: enabling the callback mechanism with nothing installed is an
     error.
@@ -74,7 +74,7 @@ def check_enable_handler_without_handler():
 
 
 @check("VI_SUSPEND_HNDLR together with VI_HNDLR is refused",
-       rule="VPP-4.3 3.7.13")
+       rule="VPP-4.3 RULE 3.7.13")
 def check_mutually_exclusive_mechanisms():
     """3.7.13: the two callback modes bitwise-OR'd together is VI_ERROR_INV_MECH.
 
@@ -99,7 +99,7 @@ def check_mutually_exclusive_mechanisms():
         return f"refused with {st!r}"
 
 
-@check("viInstallHandler refuses VI_ANY_HNDLR", rule="VPP-4.3 3.7.24")
+@check("viInstallHandler refuses VI_ANY_HNDLR", rule="VPP-4.3 RULE 3.7.24")
 def check_install_any_handler():
     """3.7.24: VI_ANY_HNDLR is a wildcard for *uninstalling*, and passing it to
     viInstallHandler returns VI_ERROR_INV_HNDLR_REF."""
@@ -130,7 +130,7 @@ def check_install_any_handler():
         return f"refused with {st!r}"
 
 
-@check("VI_TMO_IMMEDIATE does not suspend the caller", rule="VPP-4.3 3.7.20")
+@check("VI_TMO_IMMEDIATE does not suspend the caller", rule="VPP-4.3 RULE 3.7.20")
 def check_wait_immediate():
     """3.7.20: with VI_TMO_IMMEDIATE, execution "SHALL NOT be suspended".
 
@@ -159,7 +159,7 @@ def check_wait_immediate():
 
 
 @check("viWaitOnEvent dequeues an event whose type was since disabled",
-       rule="VPP-4.3 3.7.23")
+       rule="VPP-4.3 RULE 3.7.23")
 def check_dequeue_after_disable():
     """3.7.21 and 3.7.23: the queue is drained regardless of enabled state.
 
@@ -208,7 +208,7 @@ def check_dequeue_after_disable():
             quiet(inst)
 
 
-@check("discarded events do not come back", rule="VPP-4.3 3.7.21")
+@check("discarded events do not come back", rule="VPP-4.3 OBSERVATION 3.7.12")
 def check_discard_events():
     with open_inst() as inst:
         inst.enable_event(visa.SRQ, visa.QUEUE)
@@ -229,7 +229,7 @@ def check_discard_events():
 
 
 @check("a handler uninstalled while enabled stops being called",
-       rule="VPP-4.3 3.7.26")
+       rule="VPP-4.3 RULE 3.7.26")
 def check_uninstall_stops_delivery():
     """3.7.26: with no handler left installed, the callback mechanism for that
     session is disabled.
@@ -269,7 +269,7 @@ def check_uninstall_stops_delivery():
             quiet(inst)
 
 
-@check("enabling the queue twice is not an error", rule="VPP-4.3 3.7.10")
+@check("enabling the queue twice is not an error", rule="VPP-4.3 §3.7.3.1")
 def check_enable_twice():
     """Enabling an already-enabled event type is idempotent, not a fault.
 
