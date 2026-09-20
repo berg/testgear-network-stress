@@ -105,7 +105,34 @@ def SETUP(ctx):
                     break
 
 
-@check("the mixed-operation soak ran to completion", watchdog=0)
+#: How far past `--duration` the soak may run before the watchdog calls it
+#: hung. It covers the last operation overrunning and the handler teardown,
+#: both bounded by the session timeout, and nothing else: the mix stops at the
+#: deadline on its own.
+SOAK_SLACK_S = 120.0
+
+
+def _soak_watchdog() -> float:
+    return CTX["args"].duration + SOAK_SLACK_S
+
+
+def _in_flight() -> str:
+    """Which operation the soak was in the middle of, for a hang report."""
+    entry = STATE.get("in_flight")
+    if not entry:
+        return "it had not started an operation"
+    op, started, count = entry
+    return (
+        f"blocked in the {op!r} operation for {time.time() - started:.0f}s, "
+        f"{count} operations in"
+    )
+
+
+@check(
+    "the mixed-operation soak ran to completion",
+    watchdog=_soak_watchdog,
+    status=_in_flight,
+)
 def check_soak():
     """Run the random mix until `--duration` is up.
 
@@ -174,6 +201,9 @@ def check_soak():
         while time.time() < deadline:
             op = rng.choice(operations)
             tally[op] = tally.get(op, 0) + 1
+            # Published for `_in_flight`, so a hang names the operation it
+            # hung in rather than leaving someone to find it by hand.
+            STATE["in_flight"] = (op, time.time(), sum(tally.values()))
             try:
                 if op == "query":
                     got = inst.query("*IDN?").strip()
