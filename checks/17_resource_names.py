@@ -240,10 +240,25 @@ def check_parse_matches_open():
 
 
 @check("viSetBuf reports rather than raises when a size is unsupported",
-       rule="VPP-4.3 6.2.3")
+       rule="VPP-4.3 RULE 6.2.3")
 def check_set_buf():
-    """6.2.3 and 6.2.4: a TCPIP INSTR resource that cannot set the I/O buffer
-    size answers `VI_ERROR_NSUP_OPER` -- an answer, not an exception."""
+    """RULE 6.2.3: a TCPIP INSTR resource that cannot set the I/O receive
+    buffer size answers `VI_WARN_NSUP_BUF` -- an answer, not an exception.
+
+    This check used to accept `VI_SUCCESS` or `VI_ERROR_NSUP_OPER` and to say
+    so in its own docstring, which is not what the rule requires: "IF an ASRL
+    INSTR or TCPIP INSTR or TCPIP SOCKET resource does not support setting the
+    size of the I/O receive buffer, THEN a call to viSetBuf() with the
+    VI_IO_IN_BUF mask SHALL return VI_WARN_NSUP_BUF." An implementation that
+    did the mandated thing was failed by this check, and one answering with an
+    error code the rule never mentions was passed. A check that cannot be
+    satisfied by a conforming implementation is worse than no check.
+
+    `VI_ERROR_NSUP_OPER` is still accepted, because an implementation that
+    does not implement viSetBuf at all is a different (and permitted) thing
+    from one that implements it and cannot honour the size -- but it is now
+    reported as the weaker answer it is.
+    """
     from pyvisa import constants
 
     with visa.session(CTX["backend"], CTX["resource"], timeout=CTX["timeout"]) as inst:
@@ -253,13 +268,19 @@ def check_set_buf():
         if st == visa.NOT_IMPLEMENTED:
             raise AssertionError(
                 "viSetBuf raised a Python exception instead of returning a "
-                "status; 6.2.3 makes VI_ERROR_NSUP_OPER the answer when the "
-                "size cannot be set"
+                "status; RULE 6.2.3 makes VI_WARN_NSUP_BUF the answer when "
+                "the size cannot be set"
             )
         assert st in (
             StatusCode.success,
+            StatusCode.warning_nonsupported_buffer,
             StatusCode.error_nonsupported_operation,
-        ), f"viSetBuf returned {st!r}"
+        ), (
+            f"viSetBuf returned {st!r}; RULE 6.2.3 requires VI_WARN_NSUP_BUF "
+            f"when the receive buffer size cannot be set"
+        )
+        if st == StatusCode.error_nonsupported_operation:
+            return f"{st!r} (viSetBuf unimplemented; the rule asks for VI_WARN_NSUP_BUF)"
         return f"{st!r}"
 
 
