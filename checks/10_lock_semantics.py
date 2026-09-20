@@ -51,11 +51,6 @@ def as_text(value) -> str:
     return "" if value is None else str(value)
 
 
-def shared_locks_supported() -> bool:
-    """VXI-11 has no shared-lock concept at all (RULE B.6.72)."""
-    return CTX["protocol"] == "hislip"
-
-
 def lock_state(inst) -> tuple:
     return visa.call(inst.visalib.get_attribute, inst.session, RA.resource_lock_state)
 
@@ -124,19 +119,13 @@ def check_unlock_reports_nesting():
 
 
 @check("a nested shared lock reports VI_SUCCESS_NESTED_SHARED",
-       rule="VPP-4.3 RULE 3.6.30")
+       rule="VPP-4.3 RULE 3.6.30", protocols=("hislip",))
 def check_shared_nesting():
     """RULE 3.6.30, the shared-lock counterpart of RULE 3.6.28.
 
     Not 3.6.29, which is the *un*-nested shared case: a shared lock taken
     when the count was zero returns plain VI_SUCCESS.
     """
-    if not shared_locks_supported():
-        raise Skip(
-            "VXI-11 has no shared-lock concept: Device_LockParms is "
-            "{lid, flags, lock_timeout}, with no lock-type field, and "
-            "RULE B.6.71 speaks of acquiring *the* device's lock"
-        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         _, first = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "nest")
@@ -197,17 +186,12 @@ def check_nesting_holds_resource():
         )
 
 
-@check("a shared re-lock with the wrong key is refused", rule="VPP-4.3 RULE 3.6.31")
+@check("a shared re-lock with the wrong key is refused",
+       rule="VPP-4.3 RULE 3.6.31", protocols=("hislip",))
 def check_shared_wrong_key():
     """3.6.31: re-locking shared with a key that is not the resource's access
     key returns VI_ERROR_INV_ACCESS_KEY -- not a second lock, and not silence.
     """
-    if not shared_locks_supported():
-        raise Skip(
-            "VXI-11 has no shared-lock concept: Device_LockParms is "
-            "{lid, flags, lock_timeout}, with no lock-type field, and "
-            "RULE B.6.71 speaks of acquiring *the* device's lock"
-        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         _, first = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "right-key")
@@ -241,15 +225,10 @@ def check_unlock_underflow():
         return f"the unlock after the last one returned {st!r}"
 
 
-@check("a shared lock taken twice returns the same key", rule="VPP-4.3 RULE 3.6.20")
+@check("a shared lock taken twice returns the same key",
+       rule="VPP-4.3 RULE 3.6.20", protocols=("hislip",))
 def check_shared_key_stable():
     """3.6.20: re-locking shared from the same session returns the same key."""
-    if not shared_locks_supported():
-        raise Skip(
-            "VXI-11 has no shared-lock concept: Device_LockParms is "
-            "{lid, flags, lock_timeout}, with no lock-type field, and "
-            "RULE B.6.71 speaks of acquiring *the* device's lock"
-        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         first, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "nest-key")
@@ -295,19 +274,14 @@ def check_exclusive_ignores_key():
         return f"granted, key came back as {key!r}"
 
 
-@check("an over-long shared key is refused, not truncated", rule="VPP-4.3 RULE 3.6.17")
+@check("an over-long shared key is refused, not truncated",
+       rule="VPP-4.3 RULE 3.6.17", protocols=("hislip",))
 def check_long_key_refused():
     """3.6.17: a requestedKey of 256 characters or more is an error.
 
     Truncating instead would be worse than refusing: two sessions with
     different long keys would silently share a lock neither asked to share.
     """
-    if not shared_locks_supported():
-        raise Skip(
-            "VXI-11 has no shared-lock concept: Device_LockParms is "
-            "{lid, flags, lock_timeout}, with no lock-type field, and "
-            "RULE B.6.71 speaks of acquiring *the* device's lock"
-        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         key, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "k" * 300)

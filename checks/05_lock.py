@@ -2,10 +2,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Lock and unlock repeatedly, and make two sessions contend for a lock.
 
-Shared locks are a HiSLIP-only story here: VXI-11 locks are exclusive
+Shared locks are a HiSLIP-only story here. VXI-11 locks are exclusive
 (RULE B.6.74), tied to the connection (RULE B.6.77) and non-nesting
-(RULE B.6.72), and the protocol has no field to carry a key, so the shared-lock sections skip there rather than failing a backend for
-not inventing one.
+(RULE B.6.72), and `Device_LockParms` carries no field for a lock type or a
+key -- so the shared-lock sections are registered for HiSLIP only.
+
+They used to run on both and skip on VXI-11, which put a row in the VXI-11
+matrix that every implementation skipped, for a reason none of them could
+ever change. A skip means "this target could not answer"; a question the
+transport cannot pose is not a gap in coverage, it is not a question.
 """
 
 from __future__ import annotations
@@ -50,10 +55,6 @@ def b():
     return CTX["b"].visalib, CTX["b"].session
 
 
-def shared_locks() -> bool:
-    return CTX["protocol"] == "hislip"
-
-
 @contextlib.contextmanager
 def SETUP(ctx):
     """Two sessions to the same instrument, for the contention sections."""
@@ -93,7 +94,7 @@ def check_exclusive_cycles():
 
 # -- 2. shared locks ---------------------------------------------------------
 @check("repeated shared lock/unlock cycles all succeed",
-       rule="VPP-4.3 RULE 3.6.3, RULE 3.6.5")
+       rule="VPP-4.3 RULE 3.6.3, RULE 3.6.5", protocols=("hislip",))
 def check_shared_cycles():
     """Refusing shared locks outright is a rule violation, not a preference.
 
@@ -108,11 +109,6 @@ def check_shared_cycles():
     left a gap in this row and a gap in the cycles row, and neither read as a
     disagreement -- the same argument `clear_status()` makes in 07_clear.py.
     """
-    if not shared_locks():
-        raise Skip(
-            "VXI-11 locks are exclusive (RULE B.6.74), tied to the "
-            "connection (RULE B.6.77) and non-nesting (RULE B.6.72)"
-        )
     args = CTX["args"]
     lib, sess = a()
     for i in range(min(args.iterations, 50)):
@@ -252,14 +248,9 @@ def check_a_shared_lock():
     return f"got {st!r}, key {key!r}"
 
 
-@check("session B joins the shared lock with A's key", rule="VPP-4.3 §3.6.2.1")
+@check("session B joins the shared lock with A's key", rule="VPP-4.3 §3.6.2.1",
+       protocols=("hislip",))
 def check_b_joins_shared_lock():
-    if not shared_locks():
-        raise Skip(
-            "VXI-11 has no shared-lock concept: Device_LockParms is "
-            "{lid, flags, lock_timeout}, with no lock-type field, and "
-            "RULE B.6.71 speaks of acquiring *the* device's lock"
-        )
     if "shared_key" not in STATE:
         raise Skip(
             "the check that takes A's shared lock did not run, so there is no "
