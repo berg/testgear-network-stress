@@ -58,7 +58,7 @@ SPECS = {
 # followed...") out of the inventory.
 VXIBUS_RE = re.compile(
     r"^\s*(RULE|OBSERVATION|RECOMMENDATION|PERMISSION)\s+"
-    r"([A-Z]?\.?\d[\d.]*[A-Za-z]?)\s*:?\s*$"
+    r"([A-Z]?\.?\d[\d.]*[A-Za-z]?(?:-[a-z])?)\s*:?\s*$"
 )
 SECTION_RE = re.compile(r"^\s*(\d+(?:\.\d+)+)\s+(\S.{2,60}?)\s*$")
 
