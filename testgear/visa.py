@@ -161,6 +161,28 @@ def visa_status(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def target_failure(exc: BaseException) -> str | None:
+    """A readable status if `exc` is the target failing, else None.
+
+    A check that raises VisaIOError has not broken -- it asked a question and
+    got an answer, and the answer is that the operation failed. Rendering that
+    as a thirty-line traceback through pyvisa's ctypes wrapper buries the one
+    token that matters, the status, under frames that are identical every
+    time. A run against a sick instrument becomes unreadable: the DMM6500 and
+    34465A runs in issue #5 have several checks whose entire content is
+    "unexpected exception" followed by twenty-eight lines of pyvisa internals
+    and one line of VI_ERROR_CONN_LOST.
+
+    A traceback is still right for a check that genuinely broke -- a KeyError
+    or an AttributeError is a bug in this suite and the line number is the
+    whole point -- so this distinguishes the two rather than suppressing both.
+    `--verbose` prints the traceback either way.
+    """
+    if isinstance(exc, errors.VisaIOError) or is_connection_lost(exc):
+        return visa_status(exc)
+    return None
+
+
 #: SCPI errors that mean the message flow itself went wrong. These are the
 #: ones a transport bug produces, so they are treated as failures; anything
 #: else (an unsupported command, say) is only worth noting.

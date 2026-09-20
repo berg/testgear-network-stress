@@ -108,7 +108,8 @@ def check(
     name: str,
     rule: str = "",
     protocols: Iterable[str] = ("vxi11", "hislip"),
-    watchdog: float | None = None,
+    watchdog: float | Callable[[], float] | None = None,
+    status: Callable[[], str] | None = None,
 ):
     """Register a function as a named check.
 
@@ -123,11 +124,20 @@ def check(
     is raising the timeout for every check in the file -- and the timeout is
     what stops a genuine hang from costing an overnight run.
 
-    `watchdog=0` turns it off for this check. That is for a check whose length
-    the caller chooses -- the soak runs for as long as `--duration` says -- and
-    it is a real cost: a hang inside it hangs the run, which is exactly what
-    the watchdog exists to prevent. Reach for it only when no constant could
-    be right.
+    `watchdog=0` turns it off for this check. That is a real cost -- a hang
+    inside it hangs the run, which is exactly what the watchdog exists to
+    prevent -- and it is almost never the right answer. A check whose length
+    the caller chooses should pass a *callable* instead, resolved once the
+    arguments are parsed: the soak ran with no watchdog at all because no
+    constant suits both `--duration 60` and an overnight run, and against a
+    34465A it then hung 315 seconds inside the operation mix with nothing to
+    say about it. `lambda: CTX["args"].duration + slack` is a constant that
+    does suit both.
+
+    `status` is called if the watchdog does fire, and whatever it returns is
+    appended to the failure. A check that can say which of its thousand
+    operations was in flight should: the alternative is asking whoever
+    reported the hang to go and find out by hand.
     """
 
     def wrap(func: Callable) -> Callable:
@@ -135,6 +145,7 @@ def check(
         func._check_rule = rule
         func._check_protocols = tuple(protocols)
         func._check_watchdog = watchdog
+        func._check_status = status
         return func
 
     return wrap
@@ -410,6 +421,14 @@ def run_checks(
         # constant here could be right for both `--duration 60` and an
         # overnight one.
         own = getattr(func, "_check_watchdog", None)
+        # A callable is resolved now rather than at import, so a check can
+        # size its own watchdog from the arguments the run was given.
+        if callable(own):
+            try:
+                own = own()
+            except Exception as exc:  # noqa: BLE001
+                print(f"      could not size the watchdog for {name}: {exc}")
+                own = None
         timeout = watchdog if own is None else own
         try:
             if timeout:
@@ -442,7 +461,17 @@ def run_checks(
             print(f"FAIL  {name}\n      {cited}")
         except TimeoutError as exc:
             elapsed = time.time() - started
-            cited = f"{exc} [{rule}]" if rule else str(exc)
+            said = str(exc)
+            # What was it doing? A check that can answer, answers.
+            reporter = getattr(func, "_check_status", None)
+            if reporter is not None:
+                try:
+                    extra = reporter()
+                except Exception:  # noqa: BLE001
+                    extra = ""
+                if extra:
+                    said = f"{said}; {extra}"
+            cited = f"{said} [{rule}]" if rule else said
             with stats._lock:
                 stats.failures.append(f"{name}: {cited}")
                 stats.results.append(
@@ -462,16 +491,35 @@ def run_checks(
                     on_timeout()
                 except Exception as restart_exc:  # noqa: BLE001
                     stats.note(f"could not replace the target: {restart_exc}")
-        except Exception:
+        except Exception as exc:
             elapsed = time.time() - started
             trace = traceback.format_exc()
-            with stats._lock:
-                stats.failures.append(f"{name}: unexpected exception")
-                stats.results.append(
-                    Result(name, FAIL, trace, elapsed, rule, source)
-                )
-            print(f"FAIL  {name} (unexpected exception)")
-            print("      " + trace.replace("\n", "\n      ").rstrip())
+            # Imported here rather than at module scope: `visa` imports `Skip`
+            # from this file, and the cycle is real.
+            from . import visa as _visa
+
+            status = _visa.target_failure(exc)
+            if status is None:
+                # The check itself broke. The line that raised is the point.
+                with stats._lock:
+                    stats.failures.append(f"{name}: unexpected exception")
+                    stats.results.append(
+                        Result(name, FAIL, trace, elapsed, rule, source)
+                    )
+                print(f"FAIL  {name} (unexpected exception)")
+                print("      " + trace.replace("\n", "\n      ").rstrip())
+            else:
+                # The target failed. That is a result, and the status is all
+                # of it; the traceback is the same pyvisa frames every time.
+                cited = f"{status} [{rule}]" if rule else status
+                with stats._lock:
+                    stats.failures.append(f"{name}: {cited}")
+                    stats.results.append(
+                        Result(name, FAIL, cited, elapsed, rule, source)
+                    )
+                print(f"FAIL  {name}\n      {cited}")
+                if stats.verbose:
+                    print("      " + trace.replace("\n", "\n      ").rstrip())
     return stats
 
 
@@ -498,7 +546,10 @@ def registrar(namespace: dict, anchor: int | None = None) -> Callable:
         anchor = sys._getframe(1).f_lineno
     counter = itertools.count()
 
-    def add(func, name, *, rule="", protocols=("vxi11", "hislip"), watchdog=None):
+    def add(
+        func, name, *, rule="", protocols=("vxi11", "hislip"), watchdog=None,
+        status=None,
+    ):
         index = next(counter)
         # A fresh function object per registration, because `check` records
         # the name and the protocols *on the function*. Registering one
@@ -519,7 +570,8 @@ def registrar(namespace: dict, anchor: int | None = None) -> Callable:
         clone.__doc__ = func.__doc__
         clone.__dict__.update(func.__dict__)
         registered = check(
-            name, rule=rule, protocols=protocols, watchdog=watchdog
+            name, rule=rule, protocols=protocols, watchdog=watchdog,
+            status=status,
         )(clone)
         registered._check_order = (anchor, index)
         namespace[f"_check_generated_{anchor}_{index}"] = registered
