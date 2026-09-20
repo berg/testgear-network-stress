@@ -65,7 +65,7 @@ Against the same injection with a 2000 ms timeout:
 
 | implementation | behaviour |
 | --- | --- |
-| NI-VISA 26.5.0 | a timeout status in 2001 ms (code needs re-measuring, see below) |
+| NI-VISA 26.5.0 | `VI_ERROR_TMO` in 2001 ms |
 | PyVISA-py | `VI_ERROR_IO`, ~11 s late |
 | R&S VISA 5.12.9 | never returns at all (30 s watchdog) |
 
@@ -73,15 +73,13 @@ NI is exactly right on the timing: the configured deadline, to the
 millisecond. So both halves of this -- the error code and the timing -- are
 achievable, and neither is a consequence of the fault being unusual.
 
-> **The NI error code in that row needs re-measuring.** It was published as
-> `VI_ERROR_TSK_TIMEOUT`, which is not a VISA status code: it appears in no
-> part of VPP-4.3, VXI-11 or IVI-6.1, and pyvisa's error table has no such
-> abbreviation. Since this suite renders these through `visa.visa_status`,
-> which reads `abbreviation` from that table, a timeout can only ever have
-> printed as `VI_ERROR_TMO` -- so the row cannot be a faithful transcript of
-> the run it claims. Either it is a transcription slip for `VI_ERROR_TMO`, or
-> NI returned a vendor code that did not map. The same run produced all three
-> rows, so treat the comparison as unverified until it is repeated.
+> The NI row read `VI_ERROR_TSK_TIMEOUT` until 2026-09-20. No such VISA
+> status code exists -- not in VPP-4.3, VXI-11 or IVI-6.1, and with no
+> abbreviation in pyvisa, which is what `visa.visa_status` renders from. It
+> was a transcription slip. The nightly vendor run settles what NI actually
+> answers: `check_stalled_connection` asserts `error_code == VI_ERROR_TMO`
+> and NI passes it, while pyvisa-py fails with `VI_ERROR_IO` and R&S does not
+> return inside the watchdog -- the three rows below, confirmed.
 
 Reproduce:
 
