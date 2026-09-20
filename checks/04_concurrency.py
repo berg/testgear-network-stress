@@ -319,6 +319,18 @@ def churn() -> dict:
     the seventh cycle, seen on Windows -- and an unguarded raise here takes
     the two leak checks below with it, so a churn that broke would read as a
     leak check that was never written.
+
+    The guard covers a raise and did not cover the other way this stops: the
+    watchdog abandoning the thread. `STATE["churn"]` is published before the
+    loop runs, so the leak checks then found the half-filled dict and raised
+    KeyError -- reported as "unexpected exception" with a traceback, which is
+    the exact failure the paragraph above says must not happen, arriving by
+    the door it did not cover. A 34465A does 30 HiSLIP open/close cycles in
+    rather more than the 30s watchdog, so this is not hypothetical.
+
+    `measured` says whether the counts below are real. The leak checks skip
+    when they are not, because a delta against a base that was never
+    re-measured is not a small number, it is no number at all.
     """
     if "churn" in STATE:
         return STATE["churn"]
@@ -330,6 +342,9 @@ def churn() -> dict:
         "cycles": max(10, args.iterations // 10),
         "completed": 0,
         "error": None,
+        "measured": False,
+        "threads": None,
+        "fds": None,
     }
     STATE["churn"] = result
     try:
@@ -346,6 +361,7 @@ def churn() -> dict:
     time.sleep(1.0)  # give any lingering threads a chance to exit
     result["threads"] = threading.active_count()
     result["fds"] = visa.open_fd_count()
+    result["measured"] = True
     CTX["stats"].note(
         f"after {result['completed']} cycles: {result['threads']} threads, "
         f"{result['fds']} fds"
@@ -364,9 +380,20 @@ def check_churn_completes():
     return f"{result['completed']}/{result['cycles']} cycles"
 
 
+def _measured_churn() -> dict:
+    """The churn's counts, or a Skip saying why there are none."""
+    result = churn()
+    if not result["measured"]:
+        raise Skip(
+            f"the churn did not finish ({result['completed']}/"
+            f"{result['cycles']} cycles), so nothing was counted afterwards"
+        )
+    return result
+
+
 @check("repeated open/close cycles leak no threads")
 def check_no_thread_leak():
-    result = churn()
+    result = _measured_churn()
     leaked = result["threads"] - result["base_threads"]
     detail = f"{result['completed']} cycles, delta {leaked}"
     assert leaked <= 1, detail
@@ -377,7 +404,7 @@ def check_no_thread_leak():
 def check_no_fd_leak():
     """No fd directory to count on Windows. Saying so beats subtracting two
     sentinels and reporting a delta of zero as a pass."""
-    result = churn()
+    result = _measured_churn()
     if result["base_fds"] < 0:
         raise Skip("this platform exposes no open-descriptor count")
     leaked = result["fds"] - result["base_fds"]
