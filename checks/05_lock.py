@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Lock and unlock repeatedly, and make two sessions contend for a lock.
 
-Shared locks are a HiSLIP-only story here: VXI-11 locks are exclusive,
-per-link and non-nesting (RULE B.6.72), and the protocol has no field to carry
-a key, so the shared-lock sections skip there rather than failing a backend for
+Shared locks are a HiSLIP-only story here: VXI-11 locks are exclusive
+(RULE B.6.74), tied to the connection (RULE B.6.77) and non-nesting
+(RULE B.6.72), and the protocol has no field to carry a key, so the shared-lock sections skip there rather than failing a backend for
 not inventing one.
 """
 
@@ -110,8 +110,8 @@ def check_shared_cycles():
     """
     if not shared_locks():
         raise Skip(
-            "VXI-11 locks are exclusive, per-link and non-nesting "
-            "(RULE B.6.72)"
+            "VXI-11 locks are exclusive (RULE B.6.74), tied to the "
+            "connection (RULE B.6.77) and non-nesting (RULE B.6.72)"
         )
     args = CTX["args"]
     lib, sess = a()

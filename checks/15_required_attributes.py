@@ -99,6 +99,39 @@ def missing(inst, required) -> list[str]:
     return absent
 
 
+def read_only(inst, required) -> list[str]:
+    """Which of `required` can be read but not written.
+
+    Asked because "supports the attribute" and "answers a read of it" are not
+    the same claim, and `missing` only ever made the weaker one. VPP-4.3
+    defines every attribute in `MESSAGE_BASED` as R/W, so an implementation
+    that exposes one read-only is not supporting it in the sense 5.1.12 uses
+    -- and the suite was passing exactly that. NI-VISA answers a read of
+    VI_ATTR_SUPPRESS_END_EN and refuses the write (VI_ERROR_NSUP_ATTR over
+    HiSLIP), while R&S, Keysight and pyvisa-py all take it, so this is a
+    disparity rather than an opinion about the clause.
+
+    The probe writes back the value it just read, so a session that allows
+    the write is left exactly as it was found.
+    """
+    stuck = []
+    for name, attribute in required:
+        value, get_st = visa.call(inst.visalib.get_attribute, inst.session, attribute)
+        if get_st in (StatusCode.error_nonsupported_attribute, visa.NOT_IMPLEMENTED):
+            continue  # absent, which `missing` reports on its own
+        _, set_st = visa.call(
+            inst.visalib.set_attribute, inst.session, attribute, value
+        )
+        if set_st in (
+            StatusCode.error_nonsupported_attribute,
+            StatusCode.error_nonsupported_attribute_state,
+            StatusCode.error_attribute_read_only,
+            visa.NOT_IMPLEMENTED,
+        ):
+            stuck.append(f"{name} ({set_st!r})")
+    return stuck
+
+
 @check("VI_ATTR_TRIG_ID is absent everywhere, as RULE 5.1.11 does not anticipate",
        rule="VPP-4.3 RULE 5.1.11")
 def check_trig_id_universally_absent():
@@ -137,13 +170,25 @@ def check_all_instr_attributes():
 @check("every attribute RULE 5.1.12 requires of a message-based session is present",
        rule="VPP-4.3 RULE 5.1.12")
 def check_message_based_attributes():
-    """5.1.12 names TCPIP explicitly, so this applies to both transports."""
+    """5.1.12 names TCPIP explicitly, so this applies to both transports.
+
+    Every attribute here is R/W in VPP-4.3, so one that only answers reads is
+    recorded too. Whether that is a 5.1.12 failure or merely a disparity is
+    not this check's to decide -- it reports, and the row says which.
+    """
     with open_inst() as inst:
         absent = missing(inst, MESSAGE_BASED)
         assert not absent, (
             f"{len(absent)} of {len(MESSAGE_BASED)} required attributes are "
             f"unsupported: {', '.join(absent)}"
         )
+        stuck = read_only(inst, MESSAGE_BASED)
+        if stuck:
+            CTX["stats"].note(
+                f"present but not writable, though 5.1.12's attributes are "
+                f"all R/W: {', '.join(stuck)}"
+            )
+            return f"all {len(MESSAGE_BASED)} present, {len(stuck)} read-only"
         return f"all {len(MESSAGE_BASED)} present"
 
 
