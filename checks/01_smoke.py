@@ -289,8 +289,10 @@ def check_shared_lock():
     key, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "smoke-key")
     STATE["shared_key"] = key
     if CTX["protocol"] == "vxi11":
-        # VXI-11 locks are exclusive, per-link and non-nesting (RULE B.6.72);
-        # the protocol has no shared-lock concept and no field to carry a key.
+        # VXI-11 locks are exclusive (RULE B.6.74), tied to the connection
+        # (RULE B.6.77) and non-nesting (RULE B.6.72). The protocol has no
+        # shared-lock concept at all: Device_LockParms is {lid, flags,
+        # lock_timeout}, with no field to carry a lock type or a key.
         # Requiring one would be requiring the backend to invent it, which is
         # why the key check below is HiSLIP-only rather than skipped here.
         CTX["stats"].note(
@@ -338,7 +340,8 @@ def check_unlock_when_unlocked():
 
 # -- remote/local ------------------------------------------------------------
 #: VXI-11 carries only *addressed* remote/local operations: device_remote
-#: (B.6.13) asserts REN and addresses the device, device_local (B.6.14) sends
+#: (§B.6.8, RULE B.6.55) asserts REN and addresses the device,
+#: device_local (§B.6.9, RULE B.6.63) sends
 #: GTL. There is no RPC for driving the REN line on its own, so a backend
 #: refusing the unaddressed modes is conforming, not deficient -- expecting
 #: success from all of them was this check being wrong, not the backend.

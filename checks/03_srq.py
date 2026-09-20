@@ -116,8 +116,10 @@ def check_queued_delivery():
         if args.protocol == "vxi11":
             # Not a failure, but the reason this section is slow, and worth
             # saying out loud so nobody spends an afternoon on it twice:
-            # pyvisa-py does not acknowledge device_intr_srq (B.6.30, a void
-            # reply is still a reply), so a server that waits for it pays its
+            # pyvisa-py does not acknowledge device_intr_srq (§B.6.17; the
+            # one-way wording in §B.3 is unheaded, so it describes rather
+            # than rules, and a void reply is still a reply), so a server
+            # that waits for it pays its
             # timeout on every service request after the first. See
             # docs/findings.md.
             stats.note(

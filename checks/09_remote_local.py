@@ -68,7 +68,8 @@ LOCKOUT_ONLY = {
     constants.RENLineOperation.asrt_address_llo,
 }
 
-#: VXI-11 carries only the addressed operations (B.6.13, B.6.14); the
+#: VXI-11 carries only the addressed operations (§B.6.8 device_remote,
+#: §B.6.9 device_local); the
 #: unaddressed ones are legitimately refused there, so the matrix is restricted
 #: to what the transport can express.
 VXI11_MODES = frozenset(

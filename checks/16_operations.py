@@ -204,7 +204,8 @@ def check_required_ren_modes():
 
     This settles a question this suite previously answered by reasoning. The
     unaddressed modes had been ruled out because VXI-11 carries no RPC for
-    driving REN on its own (B.6.13, B.6.14) -- correct, as it turned out, but
+    driving REN on its own (§B.6.8 device_remote, §B.6.9 device_local) --
+    correct, as it turned out, but
     an inference. 6.5.6 lists the required four, and they are exactly the
     addressed ones, so refusing the rest is conforming by citation rather than
     by argument.

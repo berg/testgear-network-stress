@@ -71,7 +71,7 @@ def main() -> int:
     floor = min(overshoots) if overshoots else 0.0
     print(f"\n  fixed floor beyond the configured timeout: {floor:.2f}s")
     if wrong_error:
-        print("  error code is not VI_ERROR_TSK_TIMEOUT (VPP-4.3 3.2.2)")
+        print("  error code is not VI_ERROR_TMO (VPP-4.3 §6.1.1, viRead error codes)")
 
     return verdict(
         wrong_error or floor > TOLERATED_OVERSHOOT,

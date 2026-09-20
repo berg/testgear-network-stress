@@ -126,9 +126,17 @@ def check_unlock_reports_nesting():
 @check("a nested shared lock reports VI_SUCCESS_NESTED_SHARED",
        rule="VPP-4.3 RULE 3.6.30")
 def check_shared_nesting():
-    """3.6.29, the shared-lock counterpart of 3.6.28."""
+    """RULE 3.6.30, the shared-lock counterpart of RULE 3.6.28.
+
+    Not 3.6.29, which is the *un*-nested shared case: a shared lock taken
+    when the count was zero returns plain VI_SUCCESS.
+    """
     if not shared_locks_supported():
-        raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")
+        raise Skip(
+            "VXI-11 has no shared-lock concept: Device_LockParms is "
+            "{lid, flags, lock_timeout}, with no lock-type field, and "
+            "RULE B.6.71 speaks of acquiring *the* device's lock"
+        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         _, first = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "nest")
@@ -195,7 +203,11 @@ def check_shared_wrong_key():
     key returns VI_ERROR_INV_ACCESS_KEY -- not a second lock, and not silence.
     """
     if not shared_locks_supported():
-        raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")
+        raise Skip(
+            "VXI-11 has no shared-lock concept: Device_LockParms is "
+            "{lid, flags, lock_timeout}, with no lock-type field, and "
+            "RULE B.6.71 speaks of acquiring *the* device's lock"
+        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         _, first = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "right-key")
@@ -233,7 +245,11 @@ def check_unlock_underflow():
 def check_shared_key_stable():
     """3.6.20: re-locking shared from the same session returns the same key."""
     if not shared_locks_supported():
-        raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")
+        raise Skip(
+            "VXI-11 has no shared-lock concept: Device_LockParms is "
+            "{lid, flags, lock_timeout}, with no lock-type field, and "
+            "RULE B.6.71 speaks of acquiring *the* device's lock"
+        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         first, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "nest-key")
@@ -287,7 +303,11 @@ def check_long_key_refused():
     different long keys would silently share a lock neither asked to share.
     """
     if not shared_locks_supported():
-        raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")
+        raise Skip(
+            "VXI-11 has no shared-lock concept: Device_LockParms is "
+            "{lid, flags, lock_timeout}, with no lock-type field, and "
+            "RULE B.6.71 speaks of acquiring *the* device's lock"
+        )
     with open_inst() as inst:
         lib, sess = inst.visalib, inst.session
         key, st = visa.call(lib.lock, sess, constants.Lock.shared, 2000, "k" * 300)

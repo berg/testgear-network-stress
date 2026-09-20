@@ -210,7 +210,9 @@ def check_error_21():
 @check("a device-defined error code becomes a VISA error, not a crash",
        rule="VXI-11 §B.5.2")
 def check_unknown_error_code():
-    """B.5.2 reserves codes above 15 for device-defined errors.
+    """B.5.2 reserves every code outside Table B.2: "All other error codes
+    are reserved." It does not say who may define them -- "device-defined"
+    is this suite's word for the case, not the spec's.
 
     A client with a lookup table and no default raises KeyError here, which is
     a Python exception escaping the VISA boundary rather than an error a
@@ -525,7 +527,7 @@ def check_empty_read_times_out():
         except errors.VisaIOError as exc:
             elapsed = time.time() - started
             assert exc.error_code == StatusCode.error_timeout, (
-                f"expected VI_ERROR_TSK_TIMEOUT, got {visa.visa_status(exc)}"
+                f"expected VI_ERROR_TMO, got {visa.visa_status(exc)}"
             )
             assert elapsed < 4.0, f"a 1000ms timeout took {elapsed:.2f}s"
             return f"fired in {elapsed * 1000:.0f}ms"

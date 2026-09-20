@@ -244,7 +244,7 @@ def check_read_timeout():
         except errors.VisaIOError as exc:
             elapsed = time.time() - started
             assert exc.error_code == constants.StatusCode.error_timeout, (
-                f"expected VI_ERROR_TSK_TIMEOUT, got {visa.visa_status(exc)}"
+                f"expected VI_ERROR_TMO, got {visa.visa_status(exc)}"
             )
             # A timeout that fires late is a deadline bug: the classic shape
             # is a per-recv() timeout applied repeatedly instead of one

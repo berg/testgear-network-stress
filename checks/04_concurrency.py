@@ -42,7 +42,8 @@ def add_arguments(parser) -> None:
 def ren_mode(protocol: str) -> constants.RENLineOperation:
     """A remote/local operation the transport actually carries.
 
-    VXI-11 has no RPC for driving REN without addressing (B.6.13), so the
+    VXI-11 has no RPC for driving REN without addressing -- §B.6.8 device_remote
+    and §B.6.9 device_local both take a link id, so the
     unaddressed assert is refused there and would report a fault on every
     iteration of a worker whose job is to make unrelated traffic.
     """
@@ -251,7 +252,7 @@ def _parallel_sessions():
                         got = local.query("*IDN?").strip()
                         # Inside the lock as well: VXI-11 refuses
                         # device_readstb while another link holds the device
-                        # (B.5.2 error 11), so a status poll left outside the
+                        # (RULE B.6.34, error 11), so a status poll outside the
                         # lock fails with VI_ERROR_RSRC_LOCKED the moment a
                         # sibling takes it -- correctly, and for a reason that
                         # has nothing to do with the thing being tested.

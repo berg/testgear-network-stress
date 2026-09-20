@@ -229,7 +229,8 @@ def check_termchar_reads():
 
     RULE 6.1.1 gives the END indicator priority, so a reply whose last byte
     carries END reports plain success even though it also happens to end in
-    the termchar. Only a reply that stopped on the termchar *without* END is
+    the termchar. RULE 6.1.2 is the other half: only a reply that stopped on
+    the termchar *without* END is
     VI_SUCCESS_TERM_CHAR. Demanding the latter unconditionally fails every
     instrument that asserts END, which is most of them.
     """

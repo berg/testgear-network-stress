@@ -255,7 +255,11 @@ def check_a_shared_lock():
 @check("session B joins the shared lock with A's key", rule="VPP-4.3 §3.6.2.1")
 def check_b_joins_shared_lock():
     if not shared_locks():
-        raise Skip("VXI-11 has no shared-lock concept (RULE B.6.72)")
+        raise Skip(
+            "VXI-11 has no shared-lock concept: Device_LockParms is "
+            "{lid, flags, lock_timeout}, with no lock-type field, and "
+            "RULE B.6.71 speaks of acquiring *the* device's lock"
+        )
     if "shared_key" not in STATE:
         raise Skip(
             "the check that takes A's shared lock did not run, so there is no "

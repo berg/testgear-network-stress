@@ -130,7 +130,7 @@ def check_data_end_id_mismatch():
 
 
 @check("a reply arriving as Data then DataEND is reassembled",
-       rule="IVI-6.1 §3.1.1")
+       rule="IVI-6.1 §3.1.2")
 def check_chunked_reply():
     """The positive control for the chunked path, and until now untested.
 
@@ -291,8 +291,9 @@ def check_message_id_reset_on_clear():
 
 @check("the client reports whether overlap mode is in use", rule="IVI-6.1 §3")
 def check_overlap_mode_attribute():
-    """2.7: "All HiSLIP clients shall support both synchronized and overlapped
-    mode."
+    """§3, opening text: "All HiSLIP clients shall support both synchronized
+    and overlapped mode." That sentence introduces section 3; it is not in
+    2.7, which is "HiSLIP Buffer Sizes".
 
     Which mode a session is in changes what the client is allowed to do with
     MessageIDs, so a caller has to be able to find out. VPP-4.3 5.1.17 makes

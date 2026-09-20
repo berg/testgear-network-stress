@@ -194,7 +194,7 @@ checked and never varies with the outcome — the evidence goes in what the
 function returns, or in the message of the assertion that fails.
 
 ```python
-@check("viFlush reports a VISA status", rule="VPP-4.3 3.2.4")
+@check("viFlush reports a VISA status", rule="VPP-4.3 §3.1.2")
 def check_flush():
     """An unsupported operation must report VI_ERROR_NSUP_OPER, not raise out
     of the library: a caller cannot catch what it has no reason to expect."""
@@ -242,7 +242,7 @@ def _register_chunk_checks() -> None:
     add = harness.registrar(globals())
     for chunk in (1, 7, 64, 997):
         add(_intact(chunk), f"a large message read {chunk}B at a time is intact",
-            rule="VPP-4.3 RULE 6.1.2")
+            rule="VPP-4.3 RULE 6.1.3")
 ```
 
 ## Reports

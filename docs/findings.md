@@ -48,7 +48,8 @@ Two things are wrong with what comes back:
 | 1000 ms | `VI_ERROR_IO` | 12.05 s |
 | 3000 ms | `VI_ERROR_IO` | 14.09 s |
 
-- **The wrong error.** VPP-4.3 3.2.2 makes this `VI_ERROR_TSK_TIMEOUT`. A
+- **The wrong error.** The viRead error-code table (VPP-4.3 §6.1.1) makes
+  this `VI_ERROR_TMO`. A
   caller that retries on timeout and gives up on I/O errors — a reasonable and
   common policy — will give up on a link that was merely slow.
 - **A fixed ~11 s that is nobody's timeout.** The client's own timeout *is*
@@ -64,13 +65,23 @@ Against the same injection with a 2000 ms timeout:
 
 | implementation | behaviour |
 | --- | --- |
-| NI-VISA 26.5.0 | `VI_ERROR_TSK_TIMEOUT` in 2001 ms |
+| NI-VISA 26.5.0 | a timeout status in 2001 ms (code needs re-measuring, see below) |
 | PyVISA-py | `VI_ERROR_IO`, ~11 s late |
 | R&S VISA 5.12.9 | never returns at all (30 s watchdog) |
 
-NI is exactly right: the correct error, at the configured deadline, to the
+NI is exactly right on the timing: the configured deadline, to the
 millisecond. So both halves of this -- the error code and the timing -- are
 achievable, and neither is a consequence of the fault being unusual.
+
+> **The NI error code in that row needs re-measuring.** It was published as
+> `VI_ERROR_TSK_TIMEOUT`, which is not a VISA status code: it appears in no
+> part of VPP-4.3, VXI-11 or IVI-6.1, and pyvisa's error table has no such
+> abbreviation. Since this suite renders these through `visa.visa_status`,
+> which reads `abbreviation` from that table, a timeout can only ever have
+> printed as `VI_ERROR_TMO` -- so the row cannot be a faithful transcript of
+> the run it claims. Either it is a transcription slip for `VI_ERROR_TMO`, or
+> NI returned a vendor code that did not map. The same run produced all three
+> rows, so treat the comparison as unverified until it is repeated.
 
 Reproduce:
 
@@ -85,7 +96,7 @@ Reproduce:
 upstream `main` (`1f53786`).
 
 `viAssertTrigger` with a protocol other than `VI_TRIG_PROT_DEFAULT` returns
-`VI_SUCCESS` on a VXI-11 session. VXI-11 `device_trigger` (B.6.9) carries no
+`VI_SUCCESS` on a VXI-11 session. VXI-11 `device_trigger` (§B.6.6, RULE B.6.39) carries no
 protocol selector at all, so nothing but the default can actually have been
 performed. The HiSLIP session gets this right and returns
 `VI_ERROR_NSUP_OPER`.
@@ -142,7 +153,7 @@ Reproduce:
 
 **Status:** open. Both trees.
 
-`device_intr_srq` (B.6.30) is an ONC RPC with a void reply -- void is not the
+`device_intr_srq` (§B.6.17) is an ONC RPC with a void reply -- void is not the
 same as absent, and the server is entitled to wait for it. pyvisa-py treats the
 interrupt as one-way and sends nothing back, so a server that waits pays a
 timeout per service request.
@@ -176,7 +187,7 @@ a caller can tell a full release from a partial one:
 
 | clause | requirement | pyvisa-py | NI-VISA | R&S VISA |
 | --- | --- | --- | --- | --- |
-| 3.6.28 | a nested exclusive lock returns `VI_SUCCESS_NESTED_EXCLUSIVE` | plain `VI_SUCCESS` (HiSLIP) / `VI_ERROR_TSK_TIMEOUT` (VXI-11) | correct | correct |
+| RULE 3.6.28 | a nested exclusive lock returns `VI_SUCCESS_NESTED_EXCLUSIVE` | plain `VI_SUCCESS` (HiSLIP) / a timeout status (VXI-11) | correct | correct |
 | 3.6.32 | an unlock leaving a lock held returns `VI_SUCCESS_NESTED_EXCLUSIVE` | plain `VI_SUCCESS` | &mdash; | &mdash; |
 | 3.6.29 | a nested shared lock returns `VI_SUCCESS_NESTED_SHARED` | plain `VI_SUCCESS` | &mdash; | &mdash; |
 | 3.6.31 | a shared re-lock with a different key returns `VI_ERROR_INV_ACCESS_KEY` | granted | &mdash; | &mdash; |
@@ -744,7 +755,8 @@ only on HiSLIP, where the server's bus tenure actually provides the guarantee.
 Both looked like gaps in pyvisa-py's VXI-11 session and are neither.
 
 VXI-11 carries only *addressed* remote/local operations: `device_remote`
-(B.6.13) asserts REN and addresses the device, `device_local` (B.6.14) sends
+(§B.6.8, RULE B.6.55) asserts REN and addresses the device, `device_local`
+(§B.6.9, RULE B.6.63) sends
 GTL. There is no RPC for driving the REN line on its own, so refusing
 `VI_GPIB_REN_ASSERT` and friends is conforming. Requiring success from every
 `RENLineOperation` was the check being wrong.
@@ -881,16 +893,16 @@ why they are worth the triage:
 
 | check | clause |
 | --- | --- |
-| a connection lost mid-reply is reported, not hung | VPP-4.3 3.2.2 |
-| a write larger than maxRecvSize is split | VXI-11 B.6.4 |
-| viLock waits for the lock rather than failing at once | VPP-4.3 3.6.2.1 |
-| VI_ATTR_RSRC_LOCK_STATE reflects a held lock | VPP-4.3 3.6.2.1 |
-| the session still works after a lock attempt failed | VPP-4.3 3.6.2.1 |
-| a device that answers a read with nothing still times out | VPP-4.3 3.2.2 |
-| the session recovers from a read timeout | VPP-4.3 3.2.2 |
-| VI_ATTR_TCPIP_KEEPALIVE can be turned on | VPP-4.3 3.5 |
+| a connection lost mid-reply is reported, not hung | VPP-4.3 §6.1.1 |
+| a write larger than maxRecvSize is split | VXI-11 OBSERVATION B.6.5 |
+| viLock waits for the lock rather than failing at once | VPP-4.3 RULE 3.6.22 |
+| VI_ATTR_RSRC_LOCK_STATE reflects a held lock | VPP-4.3 RULE 3.6.24 |
+| the session still works after a lock attempt failed | (no clause) |
+| a device that answers a read with nothing still times out | VPP-4.3 §6.1.1 |
+| the session recovers from a read timeout | (no clause) |
+| VI_ATTR_TCPIP_KEEPALIVE can be turned on | (no clause: see below) |
 | VI_ATTR_SEND_END_EN=False suppresses END on the write | VXI-11 B.5.3 |
-| closing the session destroys the link | VXI-11 B.6.16 |
+| closing the session destroys the link | VXI-11 RULE B.6.9 |
 
 Two readings are possible for each and they need separating one at a time:
 

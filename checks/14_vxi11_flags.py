@@ -196,7 +196,7 @@ def check_io_timeout_matches():
 
 @check("a read asks for no more than the chunk size", rule="VXI-11 RULE B.6.23")
 def check_request_size():
-    """B.6.22 has the server return at most requestSize bytes.
+    """RULE B.6.23 has the server return at most requestSize bytes.
 
     The client's side of that bargain is asking for an amount it can actually
     take: a requestSize larger than the buffer it will read into is how a

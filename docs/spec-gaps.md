@@ -18,13 +18,13 @@ sat in the queue for a while purely because register-access rules mention
 
 | area | clauses | file |
 | --- | --- | --- |
-| Lock semantics | VPP-4.3 3.6.10-3.6.32 | `checks/10_lock_semantics.py` |
+| Lock semantics | VPP-4.3 3.6.10-3.6.39 | `checks/10_lock_semantics.py` |
 | HiSLIP client requirements | IVI-6.1 2.3, 2.7, 3.1.2 | `checks/11_hislip_messages.py` |
 | Resource template | VPP-4.3 3.2, 3.3, 3.4 | `checks/12_session_lifecycle.py` |
 | Event handling | VPP-4.3 3.7 | `checks/13_events.py` |
-| VXI-11 operation flags | VXI-11 B.5.3, B.5.4, B.6.14, B.6.22 | `checks/14_vxi11_flags.py` |
+| VXI-11 operation flags | VXI-11 §B.5.3, §B.5.4, RULE B.6.14, RULE B.6.23 | `checks/14_vxi11_flags.py` |
 | Required attributes | VPP-4.3 5.1.11-5.1.54 | `checks/15_required_attributes.py` |
-| Required operations, read statuses | VPP-4.3 5.1.72, 6.1.4, 6.1.5 | `checks/16_operations.py` |
+| Required operations, read statuses | VPP-4.3 3.2.8, 5.1.8, 5.1.72, 6.1.4, 6.1.5, 6.2.5, 6.5.6 | `checks/16_operations.py` |
 | Resource name parsing | VPP-4.3 4.3.4-4.3.20, 6.2.3 | `checks/17_resource_names.py` |
 
 Building the HiSLIP message-level injector was the enabling piece: IVI-6.1 was
@@ -133,7 +133,7 @@ Most of VXI-11's rules bind the *server*. Six bind the client:
 
 | clause | requirement | status |
 | --- | --- | --- |
-| B.4.4 | the client SHALL provide a local timeout mechanism for a server that does not respond | **this is the stalled-connection finding.** It now has a VXI-11 citation as well as VPP-4.3 3.2.2 |
+| B.4.4 | the client SHALL provide a local timeout mechanism for a server that does not respond | **this is the stalled-connection finding.** It now has a VXI-11 citation as well as VPP-4.3 §6.1.1 |
 | B.6.77 | locks are tied to the core connection; if it drops, they release | untested, and testable with the existing drop fault |
 | B.2.6 / B.2.10 | interrupt channel establishment and teardown | partly exercised by the SRQ suite, not asserted |
 | B.6.93 | `device_enable_srq` semantics | server-side |
