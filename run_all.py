@@ -31,6 +31,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -43,6 +44,19 @@ from testgear import suite  # noqa: E402
 #: and against real hardware over a network, a script doing 80 sequential
 #: open/close cycles is legitimately slow.
 DEFAULT_SCRIPT_TIMEOUT = 300.0
+
+#: How long a script may take to exit after it has printed its summary. It has
+#: already written its report and said everything it has to say by then; this
+#: only covers the failure and skip lists that follow, which are pure printing.
+EXIT_GRACE = 15.0
+
+#: The line `harness.Stats.finish` prints when a script has run every check.
+#: Seeing it means the results are in and the report is on disk -- a process
+#: still alive well after it is a finding about teardown, not a slow check,
+#: and waiting out the full --script-timeout for it learns nothing. A DMM6500
+#: run in issue #5 spent twenty minutes this way across four scripts, each of
+#: which had already printed its complete results.
+_SUMMARY = re.compile(r"^--- .+: \d+ checks passed, \d+ failed")
 
 #: What the output of a script that could not reach the target looks like. An
 #: instrument whose server has stopped accepting connections fails every check
@@ -77,11 +91,18 @@ def _terminate(proc: subprocess.Popen) -> None:
             continue
 
 
-def run_script(cmd: list[str], timeout: float) -> tuple[int | None, str]:
+def run_script(cmd: list[str], timeout: float) -> tuple[int | None, str, str]:
     """Run one check script, echoing its output as it arrives.
 
-    Returns `(returncode, output)`, with `None` for a script that had to be
-    killed.
+    Returns `(returncode, output, outcome)`. `returncode` is `None` for a
+    script that had to be killed, and `outcome` is one of:
+
+    - `""` -- it exited on its own.
+    - `"timeout"` -- it outstayed `timeout` without finishing its checks.
+    - `"hung_at_exit"` -- it printed its summary, so every check ran and the
+      report is written, and then would not exit. That is a real defect and a
+      different one: the checks are not slow, the teardown does not return.
+      Against a DMM6500 it is four scripts in one run, each already complete.
 
     This used to be `subprocess.run(capture_output=True)`, which has two
     failure modes that compound into one bad afternoon. Captured output is
@@ -107,25 +128,57 @@ def run_script(cmd: list[str], timeout: float) -> tuple[int | None, str]:
         start_new_session=os.name == "posix",
     )
     captured: list[str] = []
+    # Set by the reader thread the moment the script says it is done. Read
+    # without a lock: one writer, one reader, and a float assignment.
+    reported: list[float] = []
 
     def pump() -> None:
         assert proc.stdout is not None
         for line in proc.stdout:
             captured.append(line)
+            if not reported and _SUMMARY.match(line):
+                reported.append(time.time())
             print(line, end="", flush=True)
 
     reader = threading.Thread(target=pump, daemon=True)
     reader.start()
-    try:
-        proc.wait(timeout=timeout)
-        killed = False
-    except subprocess.TimeoutExpired:
+
+    deadline = time.time() + timeout
+    outcome = ""
+    while True:
+        try:
+            proc.wait(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            pass
+        if reported and time.time() - reported[0] > EXIT_GRACE:
+            outcome = "hung_at_exit"
+            break
+        if time.time() > deadline:
+            outcome = "timeout"
+            break
+    if outcome:
         _terminate(proc)
-        killed = True
     # Let the pump drain whatever was already in the pipe. It is a daemon, so
     # a reader still blocked after this does not hold up the sweep.
     reader.join(5)
-    return (None if killed else proc.returncode), "".join(captured)
+    return (None if outcome else proc.returncode), "".join(captured), outcome
+
+
+def _print_kills(
+    timedout: int, abandoned: list[str], stuck: int, wedged: list[str]
+) -> None:
+    """Say which scripts were killed, and which of the two ways."""
+    if timedout:
+        print(
+            f"{timedout} script(s) never finished and were killed: "
+            + ", ".join(abandoned)
+        )
+    if stuck:
+        print(
+            f"{stuck} script(s) finished every check and then would not exit: "
+            + ", ".join(wedged)
+        )
 
 
 def main() -> int:
@@ -166,12 +219,16 @@ def main() -> int:
     if reports:
         reports.mkdir(parents=True, exist_ok=True)
 
-    failed = ran = skipped = timedout = 0
+    failed = ran = skipped = timedout = stuck = 0
     # Consecutive scripts that could not reach the target. One is a check
     # leaving the instrument busy; two in a row is the instrument itself
     # gone, and nothing after it will mean anything.
     unreachable = 0
     abandoned: list[str] = []
+    # Scripts that finished their work and then would not exit. Counted apart
+    # from the ones that never finished: the results are usable, the process
+    # is the bug, and conflating them loses which of the two happened.
+    wedged: list[str] = []
     for proto in protocols:
         for script in suite.for_protocol(proto):
             ran += 1
@@ -191,18 +248,47 @@ def main() -> int:
                 iterations=args.iterations,
                 soak=args.soak,
             )
+            report_path = (
+                reports / f"{name[:-3]}-{proto}.json" if reports else None
+            )
             print(f"\n{'=' * 63}\n=== {name} [{proto}]", flush=True)
-            code, out = run_script(cmd, budget)
-            if code is None:
+            code, out, outcome = run_script(cmd, budget)
+            if outcome == "hung_at_exit":
+                # Its checks all ran: `stats.write_outputs` happens before the
+                # summary line this was recognised by, so the report on disk
+                # is complete. What did not finish is the process.
+                stuck += 1
+                failed += 1
+                wedged.append(f"{name} [{proto}]")
+                print(
+                    f">>> {name} ran every check and printed its results, then "
+                    f"would not exit; killed {EXIT_GRACE:.0f}s later."
+                )
+                print(
+                    ">>> the results above are complete"
+                    + (
+                        " and its JSON report was written"
+                        if report_path and report_path.exists()
+                        else ""
+                    )
+                    + ". The process is the finding: something in the VISA "
+                    "library's teardown did not return. A stack from it "
+                    "(`sample <pid>` on macOS) is worth more than another run."
+                )
+            elif code is None:
                 timedout += 1
                 failed += 1
                 abandoned.append(f"{name} [{proto}]")
                 print(
                     f">>> {name} was still running after {budget:.0f}s and was "
-                    f"killed. Everything above is what it managed to report; "
-                    f"it wrote no JSON report, so the matrix will show this "
-                    f"column as not having run."
+                    f"killed before it finished its checks. Everything above is "
+                    f"what it managed to report."
                 )
+                if report_path and not report_path.exists():
+                    print(
+                        ">>> it wrote no JSON report, so the matrix will show "
+                        "this column as not having run."
+                    )
                 print(
                     ">>> raise --script-timeout if this script is legitimately "
                     "slow here, or look at what it was doing when it stopped "
@@ -218,8 +304,9 @@ def main() -> int:
                     failed += 1
             skipped += len(re.findall(r"^\s*SKIP ", out, re.M))
 
-            # A script that timed out tells us nothing about whether the
-            # target is still there; it may have been killed mid-open.
+            # A script that was killed tells us nothing about whether the
+            # target is still there: one was cut off mid-check, and the other
+            # reached the end and stuck on the way out.
             if code is None:
                 continue
             if code == 3 or (code != 0 and _TARGET_GONE.search(out)):
@@ -241,18 +328,12 @@ def main() -> int:
                     f"the rest anyway."
                 )
                 print(f"\n{'=' * 63}\n{ran} scripts run, sweep stopped early")
-                if timedout:
-                    print(f"{timedout} script(s) were killed on a timeout: "
-                          + ", ".join(abandoned))
+                _print_kills(timedout, abandoned, stuck, wedged)
                 return failed or 1
 
     print(f"\n{'=' * 63}\n{ran} scripts run")
     print("all scripts passed" if not failed else f"{failed} script(s) reported failures")
-    if timedout:
-        print(
-            f"{timedout} script(s) never finished and were killed: "
-            + ", ".join(abandoned)
-        )
+    _print_kills(timedout, abandoned, stuck, wedged)
     if skipped:
         print(f"{skipped} check(s) were SKIPPED and are not passes -- see the SKIP")
         print("lines above for why each one could not run.")
