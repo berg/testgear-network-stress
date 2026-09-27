@@ -121,7 +121,11 @@ def check_terminate_cycles():
 
             def reader() -> None:
                 t0 = time.time()
-                data, st = visa.call(lib.read, sess, 4096)
+                try:
+                    data, st = visa.call(lib.read, sess, 4096)
+                except Exception as exc:  # noqa: BLE001
+                    outcome["exception"] = exc
+                    return
                 outcome["elapsed"] = time.time() - t0
                 outcome["status"] = st
                 outcome["data"] = data
@@ -148,6 +152,18 @@ def check_terminate_cycles():
                     f"the read on iteration {i} never returned, so the "
                     f"remaining cycles could not be run"
                 )
+
+            if "exception" in outcome:
+                exc = outcome["exception"]
+                stats.error(
+                    "the pending read completes without an exception",
+                    exc,
+                    detail=f"iteration {i}",
+                )
+                raise Skip(
+                    f"the pending read raised {type(exc).__name__} on "
+                    f"iteration {i}, so the remaining cycles could not be run"
+                ) from exc
 
             durations.append(time.time() - t0)
 
