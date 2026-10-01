@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -82,12 +83,28 @@ def run_one(
         except subprocess.TimeoutExpired:
             print(f"    {script}: timed out after {timeout:.0f}s", file=sys.stderr)
             return None, None
-        if not out.exists():
+        try:
+            return json.loads(out.read_text()), proc.returncode
+        except (OSError, ValueError):
+            # Missing or unreadable: either way this one script has nothing
+            # to contribute, and the rest of the column still does. Letting
+            # the parse error escape used to take every script's results
+            # with it.
             first = (proc.stderr or proc.stdout or "").strip().splitlines()
-            why = first[-1] if first else f"exit {proc.returncode}"
-            print(f"    {script}: no report ({why})", file=sys.stderr)
+            if proc.returncode is not None and proc.returncode < 0:
+                why = f"killed by {_signal_name(-proc.returncode)}"
+            else:
+                why = first[-1] if first else f"exit {proc.returncode}"
+            state = "unreadable report" if out.exists() else "no report"
+            print(f"    {script}: {state} ({why})", file=sys.stderr)
             return None, proc.returncode
-        return json.loads(out.read_text()), proc.returncode
+
+
+def _signal_name(number: int) -> str:
+    try:
+        return signal.Signals(number).name
+    except ValueError:
+        return f"signal {number}"
 
 
 merge = aggregate.merge

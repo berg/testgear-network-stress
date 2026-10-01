@@ -22,6 +22,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import json
+import os
 import pathlib
 import sys
 import threading
@@ -318,8 +319,19 @@ class Stats:
         }
 
     def write_report(self, path: str) -> None:
-        with open(path, "w") as handle:
-            json.dump(self.report(), handle, indent=2)
+        """All of the report or none of it.
+
+        Built in memory and renamed into place, because opening the file first
+        meant a process dying mid-write left it empty. That happens: building
+        the report allocates, allocation runs the collector, and the collector
+        can finalise a VISA object whose library then crashes the process. An
+        empty file reads as a corrupt report; a missing one reads as what it
+        is, a script that did not finish.
+        """
+        text = json.dumps(self.report(), indent=2)
+        tmp = pathlib.Path(f"{path}.partial")
+        tmp.write_text(text)
+        os.replace(tmp, path)
 
     def write_html(self, path: str) -> None:
         from . import report as report_module
