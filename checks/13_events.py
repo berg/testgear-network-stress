@@ -37,6 +37,24 @@ def open_inst(**kwargs):
     )
 
 
+@contextlib.contextmanager
+def waits(inst):
+    """`wait(timeout)` for a service request, with every response released
+    before the session closes -- see `visa.release_event` for why."""
+    taken = []
+
+    def wait(timeout):
+        response = inst.wait_on_event(visa.SRQ, timeout, capture_timeout=True)
+        taken.append(response)
+        return response
+
+    try:
+        yield wait
+    finally:
+        for response in taken:
+            visa.release_event(response)
+
+
 def raise_srq(inst) -> None:
     """Provoke one service request through the instrument's status model."""
     for command in ("*CLS", "*ESE 1", "*SRE 32", "*OPC"):
@@ -137,14 +155,12 @@ def check_wait_immediate():
     A timing assertion, and necessarily so: the whole content of the rule is
     that the call returns rather than waits.
     """
-    with open_inst() as inst:
+    with open_inst() as inst, waits(inst) as wait:
         inst.enable_event(visa.SRQ, visa.QUEUE)
         try:
             inst.discard_events(visa.SRQ, visa.QUEUE)
             started = time.time()
-            response = inst.wait_on_event(
-                visa.SRQ, constants.VI_TMO_IMMEDIATE, capture_timeout=True
-            )
+            response = wait(constants.VI_TMO_IMMEDIATE)
             elapsed = time.time() - started
             assert response.timed_out, (
                 "an empty queue returned an event for VI_TMO_IMMEDIATE"
@@ -168,7 +184,7 @@ def check_dequeue_after_disable():
     application already earned. This is the rule most likely to be got wrong
     by an implementation that treats "disabled" as "empty".
     """
-    with open_inst() as inst:
+    with open_inst() as inst, waits(inst) as wait:
         inst.enable_event(visa.SRQ, visa.QUEUE)
         try:
             inst.discard_events(visa.SRQ, visa.QUEUE)
@@ -176,7 +192,7 @@ def check_dequeue_after_disable():
             arrived = False
             deadline = time.time() + 5.0
             while time.time() < deadline:
-                response = inst.wait_on_event(visa.SRQ, 200, capture_timeout=True)
+                response = wait(200)
                 if not response.timed_out:
                     arrived = True
                     break
@@ -195,7 +211,7 @@ def check_dequeue_after_disable():
             time.sleep(2.5 if CTX["protocol"] == "vxi11" else 0.4)
             inst.disable_event(visa.SRQ, visa.QUEUE)
 
-            response = inst.wait_on_event(visa.SRQ, 500, capture_timeout=True)
+            response = wait(500)
             assert not response.timed_out, (
                 "an event queued before the type was disabled could no longer "
                 "be dequeued; 3.7.21 drains the queue regardless of enabled "
@@ -210,13 +226,13 @@ def check_dequeue_after_disable():
 
 @check("discarded events do not come back", rule="VPP-4.3 OBSERVATION 3.7.12")
 def check_discard_events():
-    with open_inst() as inst:
+    with open_inst() as inst, waits(inst) as wait:
         inst.enable_event(visa.SRQ, visa.QUEUE)
         try:
             raise_srq(inst)
             time.sleep(0.4)
             inst.discard_events(visa.SRQ, visa.QUEUE)
-            response = inst.wait_on_event(visa.SRQ, 300, capture_timeout=True)
+            response = wait(300)
             assert response.timed_out, (
                 "an event survived viDiscardEvents and was returned by the "
                 "next viWaitOnEvent"

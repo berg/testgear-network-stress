@@ -302,6 +302,27 @@ def session(resolved, resource: str, timeout: int = 5000, open_timeout: int = 10
             inst.close()
 
 
+def release_event(response) -> None:
+    """Close the event context a viWaitOnEvent returned, now.
+
+    pyvisa closes it in `WaitResponse.__del__`, which runs whenever the object
+    happens to be collected. When a check fails, the exception's traceback
+    keeps the check's frame -- and any response in it -- alive until the
+    collector finds the cycle, long after the session has closed. R&S VISA
+    5.12.9 segfaults closing an event context whose session is gone, where NI
+    and Keysight answer VI_ERROR_INV_OBJECT (docs/findings.md), and a segfault
+    loses the whole script's report. So close it while the session is open.
+    """
+    event = getattr(response, "event", None)
+    context = getattr(event, "_context", None)
+    if context is None:
+        return
+    with contextlib.suppress(Exception):
+        response._visalib.close(context)
+    # Leaves nothing for __del__ to close a second time.
+    event.close()
+
+
 def supports(inst, query: str) -> bool:
     """Whether the instrument answers `query` at all.
 
