@@ -335,15 +335,19 @@ def check_race_produced_srqs():
     inst, stats = CTX["session"], CTX["stats"]
     drained = 0
     drain_until = time.time() + 5.0
+    response = None
     try:
         while drained < 10000 and time.time() < drain_until:
             response = inst.wait_on_event(visa.SRQ, 0, capture_timeout=True)
             if response.timed_out:
                 break
+            visa.release_event(response)
             drained += 1
         capped = " (drain capped)" if time.time() >= drain_until else ""
         stats.note(f"{drained} service requests queued during the race{capped}")
     finally:
+        # Released here, not left to the collector: see visa.release_event.
+        visa.release_event(response)
         with contextlib.suppress(Exception):
             inst.disable_event(visa.SRQ, visa.QUEUE)
     detail = f"{drained} queued during the race{capped}"

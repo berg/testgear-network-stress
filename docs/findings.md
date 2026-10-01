@@ -534,6 +534,15 @@ implementation:
   that treats *disabled* as *empty*.
 - **R&S VISA**: shared locks over HiSLIP are refused outright with
   `VI_ERROR_INV_PROTOCOL`, where both others grant them.
+- **R&S VISA 5.12.9**: `viClose` on an event context whose session has
+  already been closed segfaults, over both VXI-11 and HiSLIP. NI-VISA 26.5.0
+  and Keysight 21.3.94 answer `VI_ERROR_INV_OBJECT`. pyvisa closes the context
+  a `viWaitOnEvent` returned whenever the `WaitResponse` is garbage-collected,
+  which after a failed check can be after its session is gone -- so this took
+  down `13_events.py` over VXI-11 in CI, and with it the whole R&S VXI-11
+  column. The suite now closes those contexts while the session is open
+  (`visa.release_event`), and a script that dies no longer costs the rest of
+  its column its results.
 - **Keysight IO Libraries 21.3.94**: cannot leave HiSLIP overlapped mode when
   the server prefers it. Setting `VI_ATTR_TCPIP_HISLIP_OVERLAP_EN` to
   `VI_FALSE` returns `VI_SUCCESS` and runs the device clear, but its
