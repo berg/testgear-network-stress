@@ -46,6 +46,20 @@ def server():
     return CTX["server"]
 
 
+def synchronized_server():
+    """The mock server, for a requirement that holds in synchronized mode only.
+
+    §3.1.2's discard rules are what a synchronized client does with a reply
+    whose MessageID is not its request's; in overlapped mode every reply
+    carries the server's own count, and there is nothing to match. Their
+    overlapped counterparts are in 18_hislip_modes.py.
+    """
+    srv = server()
+    if getattr(CTX["args"], "hislip_mode", None) == "overlapped":
+        raise Skip("a synchronized-mode requirement, and this run is overlapped")
+    return srv
+
+
 def client_ids(srv) -> list[int]:
     """MessageIDs the client put on Data, DataEND and Trigger, in order."""
     return [
@@ -108,7 +122,7 @@ def check_data_end_id_mismatch():
     question. Returning the payload is worse than any error, because nothing
     downstream can tell it is wrong.
     """
-    srv = server()
+    srv = synchronized_server()
     with open_inst() as inst:
         inst.timeout = 2000
         srv.reset()
@@ -182,7 +196,7 @@ def check_data_id_mismatch():
     What is worth checking is that the dropped chunk really is dropped rather
     than passed along.
     """
-    srv = server()
+    srv = synchronized_server()
     # Distinguishable halves. TEST:BIG? is a repeating digit pattern, so the
     # discarded chunk's bytes are indistinguishable from the kept ones and the
     # check cannot tell a conforming client from a non-conforming one -- it
@@ -229,7 +243,7 @@ def check_recovery_after_mismatch():
     payload answers the *next* query with the previous one's data, which is
     the same silent failure one exchange later.
     """
-    srv = server()
+    srv = synchronized_server()
     with open_inst() as inst:
         inst.timeout = 2000
         srv.reset()

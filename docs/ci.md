@@ -5,7 +5,7 @@ Two workflows, and a rule that holds both of them up.
 | Workflow | What it runs | Publishes | Triggers |
 | --- | --- | --- | --- |
 | [`pyvisa-py.yml`](../.github/workflows/pyvisa-py.yml) | the pyvisa-py column only, both transports, Linux and Windows | no | `pull_request`, `workflow_dispatch` (repo + ref), nightly |
-| [`full-run.yml`](../.github/workflows/full-run.yml) | every implementation, both transports | GitHub Pages | nightly, `workflow_dispatch` |
+| [`full-run.yml`](../.github/workflows/full-run.yml) | every implementation, both transports | GitHub Pages, for upstream `main` only | nightly, `workflow_dispatch` (repo + ref) |
 
 Everything else is a reusable workflow the two of them call: `_plan`,
 `_leg-linux`, `_aggregate`, `_publish`.
@@ -39,13 +39,19 @@ an adversary.
 what it is *for* — pointing it at a fork's PR branch is the whole feature — and
 it is why it has no vendor leg, no AWS role and no Pages token.
 
-The hazard is not fork pull requests specifically. A `workflow_dispatch` with a
-`repo` input is the same hazard arriving through a different door. So the rule
-is about the workflow rather than the event, and it is enforced structurally:
+The hazard is not fork pull requests specifically: anything that runs a tree
+somebody else wrote is the same hazard. What differs is who chooses the tree,
+and the rule is enforced by keeping the credential out of reach of the code
+rather than by trusting the choice:
 
-- `full-run.yml` **takes no repo or ref input at all**. It hardcodes
-  `pyvisa/pyvisa@main` and `pyvisa/pyvisa-py@main`. Testing a branch is what
-  the other workflow is for.
+- `full-run.yml` runs upstream `pyvisa/pyvisa-py@main` nightly, and any
+  `repo` and `ref` when dispatched. Dispatch needs write access to this
+  repository, so the person choosing the tree is one who could change the
+  workflow anyway. Either way the vendor legs fetch the installer and drop
+  the credential (below) before any of the tree's code runs, and that code
+  runs only inside `docker run`, which is handed none of the job's
+  environment. A run against anything but upstream `main` does not publish
+  to Pages, so the published page is always the nightly's.
 - `tools/gha_matrix.py` emits no `vendor: true` leg for a `pyvisa-py` run, so
   no job that would assume the role is ever created.
 - The vendor legs enter the `vendor-drivers` GitHub Environment, whose

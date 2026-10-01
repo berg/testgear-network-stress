@@ -247,6 +247,33 @@ def open_fd_count() -> int:
     return -1
 
 
+#: The IVI-6.1 operating mode to switch every HiSLIP session into after it
+#: opens: "synchronized", "overlapped", or None to leave it as negotiated. Set
+#: by `cli.open_target` from --hislip-mode when the target is real hardware.
+HISLIP_MODE: str | None = None
+
+
+def is_hislip(resource: str) -> bool:
+    return "::hislip" in resource.lower()
+
+
+def set_hislip_overlap(inst, overlapped: bool) -> bool | None:
+    """Ask for a HiSLIP operating mode; return the mode the session is in.
+
+    VPP-4.3 5.1: VI_ATTR_TCPIP_HISLIP_OVERLAP_EN is R/W, and "If changed,
+    VISA will do a Device Clear operation to change the mode." The server has
+    the last word (IVI-6.1 6.12.1), so the answer is read back, not assumed.
+    None means the attribute could not be read at all.
+    """
+    attr = constants.ResourceAttribute.tcpip_hislip_overlap_enable
+    status(inst.visalib.set_attribute, inst.session, attr,
+           constants.VI_TRUE if overlapped else constants.VI_FALSE)
+    value, st = call(inst.visalib.get_attribute, inst.session, attr)
+    if st != constants.StatusCode.success or value is None:
+        return None
+    return bool(value)
+
+
 @contextlib.contextmanager
 def session(resolved, resource: str, timeout: int = 5000, open_timeout: int = 10000, **kwargs):
     """Open one session and close it, leaving the ResourceManager alone.
@@ -260,6 +287,15 @@ def session(resolved, resource: str, timeout: int = 5000, open_timeout: int = 10
     inst = rm.open_resource(resource, open_timeout=open_timeout, **kwargs)
     inst.timeout = timeout
     try:
+        if HISLIP_MODE and is_hislip(resource):
+            wanted = HISLIP_MODE == "overlapped"
+            got = set_hislip_overlap(inst, wanted)
+            if got is not wanted:
+                raise Skip(
+                    f"--hislip-mode {HISLIP_MODE}: the session is "
+                    f"{'in an unknown mode' if got is None else ('overlapped' if got else 'synchronized')}"
+                    f" after asking, so it cannot run in the mode requested"
+                )
         yield inst
     finally:
         with contextlib.suppress(Exception):

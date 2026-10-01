@@ -92,6 +92,17 @@ def build_parser(description: str, protocol: str | None = None) -> argparse.Argu
         "setup, which nothing else in this suite does. See PREPARE_RECIPES",
     )
     parser.add_argument(
+        "--hislip-mode",
+        choices=("synchronized", "overlapped"),
+        default=os.environ.get("TESTGEAR_HISLIP_MODE") or None,
+        help="run HiSLIP sessions in this IVI-6.1 operating mode. Against the "
+        "mock, the server starts every session in it, so the client has to "
+        "pick it up by itself; against --resource, each session is switched "
+        "into it with VI_ATTR_TCPIP_HISLIP_OVERLAP_EN after opening, and the "
+        "checks skip if the instrument will not go. Omit to leave the mode "
+        "alone (env: TESTGEAR_HISLIP_MODE)",
+    )
+    parser.add_argument(
         "--no-proxy",
         action="store_true",
         help="run the mock server without its fault-injecting proxy. "
@@ -161,8 +172,14 @@ def open_target(args):
     so a check that raises does not leave a server holding a port.
     """
     resolved = resolve_backend(args)
+    mode = getattr(args, "hislip_mode", None)
 
     if args.resource:
+        # A real instrument starts sessions in whatever mode it prefers, so
+        # the only way to choose is to ask, per session, the VPP-4.3 way.
+        from . import visa
+
+        visa.HISLIP_MODE = mode
         yield resolved, args.resource, None
         return
 
@@ -176,5 +193,8 @@ def open_target(args):
 
     from .server import mock_server
 
-    with mock_server(proxy=not args.no_proxy) as server:
+    # Against the mock the server chooses, so the client is tested on
+    # following the mode it is given, not on asking for one.
+    modes = {"synchronized": None, "overlapped": "prefer-overlapped"}.get(mode)
+    with mock_server(proxy=not args.no_proxy, hislip_modes=modes) as server:
         yield resolved, server.resource(args.protocol), server

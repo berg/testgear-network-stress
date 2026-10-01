@@ -85,6 +85,32 @@ struct Args {
     /// skipped.
     #[arg(long)]
     exit_with_parent: bool,
+
+    /// HiSLIP operating modes to offer (IVI-6.1 §3).
+    ///
+    /// `synchronized` is what ugpibd runs and the default here. The other two
+    /// offer both modes and differ in which one a session starts in, which is
+    /// what a client's VI_ATTR_TCPIP_HISLIP_OVERLAP_EN defaults to (VPP-4.3).
+    /// A client can still ask for the other at any device clear.
+    #[arg(long, value_enum, default_value_t = HislipModes::Synchronized)]
+    hislip_modes: HislipModes,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum HislipModes {
+    Synchronized,
+    PreferSynchronized,
+    PreferOverlapped,
+}
+
+impl From<HislipModes> for hislip::server::Modes {
+    fn from(m: HislipModes) -> Self {
+        match m {
+            HislipModes::Synchronized => Self::Synchronized,
+            HislipModes::PreferSynchronized => Self::PreferSynchronized,
+            HislipModes::PreferOverlapped => Self::PreferOverlapped,
+        }
+    }
 }
 
 #[tokio::main]
@@ -187,9 +213,11 @@ async fn main() -> Result<()> {
 
     let hislip_ctrl = backend.clone();
     let hislip_locks = locks.clone();
+    let hislip_modes = args.hislip_modes;
     let hislip_fut = async move {
         let config = hislip::server::Config {
             locks: hislip_locks,
+            modes: hislip_modes.into(),
             ..Default::default()
         };
         let device_for = move |subaddr: &str| {

@@ -87,7 +87,27 @@ jobs:
             --full-page --out site/index.html --reports "${reports[@]}" \
             --source-url "${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}"
 
+      # The page again, on its own and unzipped, so a run has one file a
+      # person can link to from an issue and open without unpacking anything.
+      # Kept longer than the site: a link in an issue outlives a month.
+      - name: Name the page
+        id: page
+        if: always() && hashFiles('site/index.html') != ''
+        continue-on-error: true
+        run: cp site/index.html conformance-matrix.html
+      - name: Upload the page as a single file
+        id: page-artifact
+        if: always() && steps.page.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          path: conformance-matrix.html
+          archive: false
+          retention-days: 90
+
       - name: Render the Markdown
+        env:
+          PAGE_URL: ${{ steps.page-artifact.outputs.artifact-url }}
         run: |
           python tools/markdown_summary.py \
             --columns site/columns \
@@ -96,6 +116,12 @@ jobs:
             --title "${{ inputs.title }}" \
             --subtitle "${{ inputs.subtitle }}" \
             --page-url "${{ inputs.page-url }}"
+          if [[ -n "$PAGE_URL" ]]; then
+            {
+              echo "**[The matrix page]($PAGE_URL)** -- one HTML file, kept 90 days."
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           cat step-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       # One sorted line per check, no measurements. Two runs' site artifacts

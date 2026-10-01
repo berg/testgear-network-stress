@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Everything, against the latest main of both pyvisa and pyvisa-py.
+# Everything: every implementation, both transports.
 #
-# This workflow takes no repository or ref input, deliberately. It is the only
-# one that can reach the vendor installers, and giving it a caller-named tree
-# would mean a credential-holding job running code chosen by whoever pressed
-# the button. The refs are hardcoded upstream; testing a branch is what
-# pyvisa-py.yml is for.
+# Nightly against the latest main of pyvisa and pyvisa-py. Dispatched by hand,
+# against any pyvisa-py tree -- a fork, a branch, a commit -- so a branch can be
+# shown next to the vendors on the same page. Only someone with write access
+# can dispatch, and the vendor credential is cleared before anything from the
+# tree runs (see docs/ci.md).
 name: full run
 
 on:
@@ -17,6 +17,13 @@ on:
     # next Sunday.
     - cron: "0 4 * * *"
   workflow_dispatch:
+    inputs:
+      repo:
+        description: owner/repo of the pyvisa-py tree to test
+        default: pyvisa/pyvisa-py
+      ref:
+        description: branch, tag or SHA
+        default: main
 
 permissions:
   contents: read
@@ -26,11 +33,6 @@ concurrency:
   # Never cancel: a vendor run is the better part of an hour and the page is
   # its only output.
   cancel-in-progress: false
-
-env:
-  PYVISA_PY_REPO: pyvisa/pyvisa-py
-  PYVISA_PY_REF: main
-  PYVISA_REF: main
 
 jobs:
   plan:
@@ -55,8 +57,8 @@ jobs:
     secrets: inherit
     with:
       leg: ${{ toJSON(matrix.leg) }}
-      pyvisa-py-repo: pyvisa/pyvisa-py
-      pyvisa-py-ref: main
+      pyvisa-py-repo: ${{ inputs.repo || 'pyvisa/pyvisa-py' }}
+      pyvisa-py-ref: ${{ inputs.ref || 'main' }}
       pyvisa-ref: main
       # Vendor legs enter the environment; py legs get "". The environment is
       # what a fork PR cannot reach, and its branch policy is enforced by AWS
@@ -72,16 +74,24 @@ jobs:
     uses: ./.github/workflows/_aggregate.yml
     with:
       plan: ${{ needs.plan.outputs.legs }}
-      title: VISA Conformance Matrix
+      title: >-
+        VISA Conformance Matrix${{ ((inputs.repo || 'pyvisa/pyvisa-py') != 'pyvisa/pyvisa-py' || (inputs.ref || 'main') != 'main') && format(' -- pyvisa-py {0}@{1}', inputs.repo || 'pyvisa/pyvisa-py', inputs.ref || 'main') || '' }}
       subtitle: >-
-        Every implementation, both transports, against the latest main of
-        pyvisa and pyvisa-py.
-      page-url: https://berg.github.io/testgear-network-stress/
-      pages: true
+        Every implementation, both transports, against pyvisa main and
+        pyvisa-py ${{ inputs.repo || 'pyvisa/pyvisa-py' }}@${{ inputs.ref || 'main' }}.
+      # Pages holds one page, the nightly's. A run against any other tree
+      # leaves its own conformance-matrix.html instead of replacing it, and
+      # does not link the Pages URL as though it were this run's page.
+      page-url: >-
+        ${{ (inputs.repo || 'pyvisa/pyvisa-py') == 'pyvisa/pyvisa-py' && (inputs.ref || 'main') == 'main' && 'https://berg.github.io/testgear-network-stress/' || '' }}
+      pages: ${{ (inputs.repo || 'pyvisa/pyvisa-py') == 'pyvisa/pyvisa-py' && (inputs.ref || 'main') == 'main' }}
 
   publish:
     needs: [aggregate]
-    if: always() && needs.aggregate.result != 'skipped'
+    if: >-
+      always() && needs.aggregate.result != 'skipped'
+      && (inputs.repo || 'pyvisa/pyvisa-py') == 'pyvisa/pyvisa-py'
+      && (inputs.ref || 'main') == 'main'
     permissions:
       contents: read
       # Pages' own deploy token, unrelated to the AWS one above.

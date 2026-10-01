@@ -61,6 +61,14 @@ VXIBUS_RE = re.compile(
     r"([A-Z]?\.?\d[\d.]*[A-Za-z]?(?:-[a-z])?)\s*:?\s*$"
 )
 SECTION_RE = re.compile(r"^\s*(\d+(?:\.\d+)+)\s+(\S.{2,60}?)\s*$")
+#: Section headings in VPP-4.3 and VXI-11: at the left margin, a dotted
+#: number -- lettered in VXI-11's appendix, which also adds a trailing dot
+#: ("B.5.3. Operation Flags") -- then the title. Table-of-contents entries
+#: look the same but carry a dot leader to the page number; they are excluded
+#: so a statement is never filed under a contents line.
+VXIBUS_SECTION_RE = re.compile(
+    r"^((?:[A-Z]\.)?\d+(?:\.\d+)+)\.?\s+([A-Za-z_][^.]*?(?:\.(?!\.)[^.]*?)*)\s*$"
+)
 
 
 def to_text(pdf: Path, cache: Path) -> str:
@@ -78,10 +86,20 @@ def to_text(pdf: Path, cache: Path) -> str:
 
 
 def parse_vxibus(text: str, spec: str) -> list[dict]:
-    """RULE 3.2.3 followed by its indented body, until the next heading."""
+    """RULE 3.2.3 followed by its indented body, until the next heading.
+
+    Each statement also records the section heading it sits under. A RULE's
+    number does not say: RULE 5.1.20 is the twentieth rule in section 5.1, not
+    something inside section 5.1.2, so the only way to know which statements a
+    section citation reaches is to remember where each one was found.
+    """
     lines = text.splitlines()
     out, i = [], 0
+    section = "?"
     while i < len(lines):
+        heading = VXIBUS_SECTION_RE.match(lines[i])
+        if heading and "..." not in lines[i]:
+            section = heading.group(1)
         m = VXIBUS_RE.match(lines[i])
         if not m:
             i += 1
@@ -106,6 +124,7 @@ def parse_vxibus(text: str, spec: str) -> list[dict]:
                 "cite": f"{spec} {kind.title()} {ident}"
                 if kind != "RULE"
                 else f"{spec} {ident}",
+                "section": section,
                 "text": " ".join(body),
             }
         )
@@ -113,14 +132,32 @@ def parse_vxibus(text: str, spec: str) -> list[dict]:
     return out
 
 
+#: A table-of-contents entry: number, title, dot leader, page.
+TOC_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)\s+(.+?)\s*\.{3,}\s*\d+\s*$")
+#: A top-level heading, "3 Overlapped and Synchronized Modes". It looks like a
+#: numbered table row ("3 Server <InitializeResponse>..."), so it is believed
+#: only when the table of contents lists the same number and title.
+CHAPTER_RE = re.compile(r"^(\d+)\s+(\S.{2,60}?)\s*$")
+
+
 def parse_shall(text: str, spec: str) -> list[dict]:
     """A "shall" sentence, tagged with the section it sits in."""
+    lines = text.splitlines()
+    chapters = {
+        (m.group(1), re.sub(r"\s+", " ", m.group(2)))
+        for m in map(TOC_RE.match, lines)
+        if m and "." not in m.group(1)
+    }
     section, section_title = "?", ""
     out = []
-    for line in text.splitlines():
+    for line in lines:
         m = SECTION_RE.match(line)
         if m and not m.group(2).endswith("."):
             section, section_title = m.group(1), m.group(2).strip()
+            continue
+        c = CHAPTER_RE.match(line)
+        if c and (c.group(1), re.sub(r"\s+", " ", c.group(2))) in chapters:
+            section, section_title = c.group(1), c.group(2).strip()
             continue
         if re.search(r"\bshall\b", line, re.I) and len(line.strip()) > 30:
             out.append(
@@ -129,7 +166,8 @@ def parse_shall(text: str, spec: str) -> list[dict]:
                     "kind": "SHALL",
                     "id": section,
                     "cite": f"{spec} {section}",
-                    "section": section_title,
+                    "section": section,
+                    "section_title": section_title,
                     "text": line.strip(),
                 }
             )
@@ -192,10 +230,56 @@ def cited_rules() -> dict[str, list[str]]:
     return cites
 
 
-def normalise(cite: str) -> str:
-    """`VPP-4.3 RULE 6.1.1` and `VPP-4.3 6.1.1` are the same clause."""
-    c = cite.upper().replace("RULE", "").replace("SECTION", "")
-    return re.sub(r"[^A-Z0-9.]+", " ", c).strip()
+KINDS = ("RULE", "OBSERVATION", "RECOMMENDATION", "PERMISSION")
+
+
+def parse_cite(cite: str) -> list[tuple[str, str, str]]:
+    """`VPP-4.3 RULE 3.6.3, RULE 3.6.5` -> [(spec, kind, number), ...].
+
+    Kind is one of KINDS, "SECTION" for a `§` reference, or "UNTYPED" for a
+    bare number -- which AGENTS.md forbids, because VPP-4.3 and VXI-11 number
+    each kind on its own counter and a bare 3.7.12 can mean four things.
+    """
+    m = re.match(r"^\s*(\S+(?:\s+\d+)?)\s+(.*)$", cite)
+    if not m:
+        return []
+    spec, rest = m.group(1), m.group(2)
+    parts = []
+    for part in rest.split(","):
+        part = part.strip()
+        typed = re.match(rf"^({'|'.join(KINDS)})\s+(\S+)$", part)
+        if typed:
+            parts.append((spec, typed.group(1), typed.group(2)))
+        elif part.startswith("§"):
+            parts.append((spec, "SECTION", part[1:].strip()))
+        elif part:
+            parts.append((spec, "UNTYPED", part))
+    return parts
+
+
+def covers(rule: dict, spec: str, kind: str, number: str) -> bool:
+    """Whether one typed citation reaches one extracted statement.
+
+    A numbered citation reaches that statement and its lettered sub-rules
+    (RULE 5.1.31 covers 5.1.31-a), and nothing else -- not RULE 5.1.310 because
+    the digits begin the same way.
+
+    A section citation is, by AGENTS.md, a citation of prose: "Cite the section
+    only when the requirement is in prose or a table and not in a numbered
+    statement." So it never earns a numbered RULE or OBSERVATION, however many
+    sit under that heading. It reaches only the prose "shall" sentences this
+    tool extracts from IVI-6.1, and only those in exactly that section: §3 is
+    not a citation of everything in §3.1.1 and §3.2.2.
+    """
+    if rule["spec"] != spec:
+        return False
+    if kind == "SECTION":
+        return rule["kind"] == "SHALL" and rule.get("section") == number
+    if kind in KINDS:
+        return rule["kind"] == kind and (
+            rule["id"] == number or rule["id"].startswith(number + "-")
+        )
+    return False
 
 
 def main() -> int:
@@ -240,17 +324,32 @@ def main() -> int:
         return 4
 
     cites = cited_rules()
-    cite_index = {normalise(c): (c, v) for c, v in cites.items()}
+    typed = [(c, part, checks) for c, checks in cites.items() for part in parse_cite(c)]
     for rule in rules:
-        key = normalise(rule["cite"])
-        hit = cite_index.get(key)
-        # A rule is also covered when a check cites the section it lives in.
-        if hit is None:
-            for ck, (orig, checks) in cite_index.items():
-                if ck and (key.startswith(ck) or ck.startswith(key)):
-                    hit = (orig, checks)
-                    break
-        rule["covered_by"] = sorted(set(hit[1])) if hit else []
+        hits = set()
+        for _cite, (spec, kind, number), checks in typed:
+            if covers(rule, spec, kind, number):
+                hits.update(checks)
+        rule["covered_by"] = sorted(hits)
+
+    # A citation into a spec this tool reads that reaches nothing is wrong --
+    # a number that does not exist, or a reference with no kind -- and each
+    # is named rather than silently counted as nothing. The exception is a
+    # section citation into a RULE-numbered spec: that cites prose, which this
+    # tool does not extract, so it is listed as such and is not an error.
+    dangling = []
+    for cite, (spec, kind, number), checks in typed:
+        if spec not in found_specs:
+            continue
+        if kind == "SECTION" and SPECS[spec]["style"] == "vxibus":
+            dangling.append((cite, "PROSE", sorted(set(checks))))
+        elif kind == "UNTYPED" or not any(covers(r, spec, kind, number) for r in rules):
+            dangling.append((cite, kind, sorted(set(checks))))
+    for cite, kind, checks in dangling:
+        if kind == "PROSE":
+            continue
+        why = "no kind (RULE, §, ...)" if kind == "UNTYPED" else "matches no statement"
+        print(f"!! {cite}: {why} -- cited by {', '.join(checks)}", file=sys.stderr)
 
     covered = [r for r in rules if r["covered_by"]]
     print(f"\n{len(rules)} normative statements, {len(covered)} touched by a check")
@@ -275,12 +374,12 @@ def main() -> int:
         print(f"inventory written to {args.json}")
 
     if args.out:
-        write_report(Path(args.out), rules, found_specs, cites)
+        write_report(Path(args.out), rules, found_specs, cites, dangling)
         print(f"report written to {args.out}")
     return 0
 
 
-def write_report(out: Path, rules, found_specs, cites) -> None:
+def write_report(out: Path, rules, found_specs, cites, dangling=()) -> None:
     covered = [r for r in rules if r["covered_by"]]
     lines = [
         "# Spec coverage",
@@ -343,6 +442,39 @@ def write_report(out: Path, rules, found_specs, cites) -> None:
     ]
     for cite in sorted(cites):
         lines.append(f"| `{cite}` | {', '.join(sorted(set(cites[cite])))} |")
+    prose = [d for d in dangling if d[1] == "PROSE"]
+    broken = [d for d in dangling if d[1] != "PROSE"]
+    if prose:
+        lines += [
+            "",
+            "## Section citations into VPP-4.3 and VXI-11",
+            "",
+            "These cite prose or a table, which is what a section citation is for,",
+            "and this tool extracts only the numbered statements from those two",
+            "documents -- so they are listed, not counted. A section citation",
+            "never earns the numbered RULEs filed under the same heading.",
+            "",
+            "| citation | checks |",
+            "| --- | --- |",
+        ]
+        for cite, _kind, checks in sorted(prose):
+            lines.append(f"| `{cite}` | {', '.join(checks)} |")
+    if broken:
+        lines += [
+            "",
+            "## Citations that reach nothing",
+            "",
+            "Each of these names a clause in a spec this tool reads but matches no",
+            "statement it extracted: a number that does not exist, a section with no",
+            "\"shall\" sentence of its own, or a reference without a kind. Either",
+            "the citation or the extraction is wrong.",
+            "",
+            "| citation | why | checks |",
+            "| --- | --- | --- |",
+        ]
+        for cite, kind, checks in sorted(broken):
+            why = "no kind" if kind == "UNTYPED" else "matches no statement"
+            lines.append(f"| `{cite}` | {why} | {', '.join(checks)} |")
     out.write_text("\n".join(lines) + "\n")
 
 
