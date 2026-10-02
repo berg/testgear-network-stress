@@ -49,6 +49,13 @@ def io():
     return CTX["session"].visalib, CTX["session"].session
 
 
+def terminate_cycles_watchdog() -> float:
+    """Allow the configured cycles to finish without abandoning their thread."""
+    args = CTX["args"]
+    # HiSLIP recovery may spend two seconds waiting for Interrupted each cycle.
+    return max(30.0, args.iterations * (args.delay + 2.5) + 5.0)
+
+
 def require_terminate() -> None:
     """Skip, rather than fail, where viTerminate does not exist.
 
@@ -91,7 +98,11 @@ def SETUP(ctx):
             visa.check_errors(session, ctx["stats"], "at end of run")
 
 
-@check("repeated terminate/recover cycles all succeed", rule="VPP-4.3 §3.5.1.1")
+@check(
+    "repeated terminate/recover cycles all succeed",
+    rule="VPP-4.3 §3.5.1.1",
+    watchdog=terminate_cycles_watchdog,
+)
 def check_terminate_cycles():
     """Terminate a blocked read `--iterations` times, resynchronising between.
 
