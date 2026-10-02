@@ -77,6 +77,26 @@ Every run prints the tree and the commit it actually loaded. A result that
 cannot name what produced it is not reproducible, and comparing trees is the
 point.
 
+## HiSLIP operating modes
+
+HiSLIP has two (IVI-6.1 section 3): synchronized, where a second query before
+the first reply is read is an error, and overlapped, where queries pipeline.
+Clients must support both; servers may offer either or both. The mock offers
+synchronized only unless told otherwise, as ugpibd does. To run the HiSLIP
+checks in overlapped mode:
+
+```bash
+./run_all.sh --protocol hislip --hislip-mode overlapped
+./.venv/bin/python checks/06_terminate.py --hislip-mode overlapped
+./.venv/bin/python checks/06_terminate.py --hislip-mode overlapped -r TCPIP0::10.0.0.5::hislip0::INSTR
+```
+
+Against the mock, the server starts every session overlapped and the client is
+expected to notice by itself. Against real hardware, each session is switched
+with `VI_ATTR_TCPIP_HISLIP_OVERLAP_EN` after it opens, and the checks skip if
+the instrument will not go. `checks/18_hislip_modes.py` covers the negotiation
+and overlapped mode's own rules in either case.
+
 ## Comparing backends
 
 Every check is written against the VISA API, not against pyvisa-py, so the same

@@ -41,9 +41,10 @@ API.
 2. **IVI-6.1 3.1.2 rules 3 and 4** -- clearing validated buffers when the
    client sends, and the Interrupted / AsyncInterrupted ordering. Both need the
    injector to *originate* messages rather than only rewrite them.
-3. **IVI-6.1 3.2.2**, overlap mode client requirements. Untouched, and the
-   AsyncStatusQuery MessageID rule is the same shape as the rules already
-   covered for synchronised mode.
+3. ~~**IVI-6.1 3.2.2**, overlap mode client requirements.~~ **Done**, see
+   `checks/18_hislip_modes.py`, which needed the vendored server to implement
+   overlapped mode first (ugpibd `Config::modes`). `--hislip-mode overlapped`
+   also runs the rest of the HiSLIP suite in that mode.
 4. **VPP-4.3 6.3**, the remaining operation definitions -- 49 uncovered, the
    largest single block left.
 5. **A server that chunks its replies.** Rule 2 of 3.1.2 is unreachable while

@@ -95,8 +95,14 @@ class MockServer:
         proxy: bool = True,
         log_level: str | None = None,
         portmap: bool | None = None,
+        hislip_modes: str | None = None,
     ):
         self.host = host
+        # IVI-6.1 section 3 operating modes the HiSLIP server offers:
+        # "synchronized" (the server's default, and ugpibd's), or
+        # "prefer-synchronized" / "prefer-overlapped", which offer both and
+        # start sessions in the one named.
+        self._hislip_modes = hislip_modes
         self._pads = pads
         self._proxy = proxy
         # A portmapper is what makes the VXI-11 server reachable by the
@@ -136,6 +142,8 @@ class MockServer:
             argv.append("--no-proxy")
         if self._portmap:
             argv.append("--portmap")
+        if self._hislip_modes:
+            argv += ["--hislip-modes", self._hislip_modes]
 
         self._process = subprocess.Popen(
             argv,

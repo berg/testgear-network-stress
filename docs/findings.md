@@ -360,6 +360,29 @@ Reproduce:
 # "viClear returns a status rather than raising (unread response)"
 ```
 
+### HiSLIP sessions ignore the server's operating mode (IVI-6.1 §3)
+
+**Status:** open on PyPI 0.8.1, which fails 18 of the 21 checks in
+`18_hislip_modes.py`. Confirmed against all three vendors: NI-VISA 26.5.0 and
+R&S VISA 5.12.9 pass all 21; Keysight IO Libraries 21.3.94 passes 18, and its
+three failures are a disparity of its own (see the vendor findings below).
+
+"All HiSLIP clients shall support both synchronized and overlapped mode"
+(§3), and the server chooses the starting mode in InitializeResponse bit 0
+(§6.1). pyvisa-py logs that bit and then runs synchronized regardless, and
+`VI_ATTR_TCPIP_HISLIP_OVERLAP_EN` is a stored `VI_FALSE` that writing does
+not act on: no device clear, no request in DeviceClearComplete (VPP-4.3
+§5.1.2: "If changed, VISA will do a Device Clear operation to change the
+mode").
+
+Against a server that starts sessions overlapped, it works until the first
+write-only command. That puts the server's reply numbering (§3.2.1) and the
+client's request numbering out of step, and from then on the synchronized
+discard rule (§3.1.2 rule 1) throws away every reply as mismatched: each query
+times out. The suite could not see any of this until the vendored server
+learned overlapped mode, because a synchronized-only server is the one
+arrangement where ignoring the mode is harmless.
+
 ### HiSLIP reconnection fails partway through open/close churn, on Windows
 
 **Status:** open, **side not yet determined, and no longer exercised**.
@@ -511,6 +534,23 @@ implementation:
   that treats *disabled* as *empty*.
 - **R&S VISA**: shared locks over HiSLIP are refused outright with
   `VI_ERROR_INV_PROTOCOL`, where both others grant them.
+- **R&S VISA 5.12.9**: `viClose` on an event context whose session has
+  already been closed segfaults, over both VXI-11 and HiSLIP. NI-VISA 26.5.0
+  and Keysight 21.3.94 answer `VI_ERROR_INV_OBJECT`. pyvisa closes the context
+  a `viWaitOnEvent` returned whenever the `WaitResponse` is garbage-collected,
+  which after a failed check can be after its session is gone -- so this took
+  down `13_events.py` over VXI-11 in CI, and with it the whole R&S VXI-11
+  column. The suite now closes those contexts while the session is open
+  (`visa.release_event`), and a script that dies no longer costs the rest of
+  its column its results.
+- **Keysight IO Libraries 21.3.94**: cannot leave HiSLIP overlapped mode when
+  the server prefers it. Setting `VI_ATTR_TCPIP_HISLIP_OVERLAP_EN` to
+  `VI_FALSE` returns `VI_SUCCESS` and runs the device clear, but its
+  DeviceClearComplete asks for overlapped again -- it requests the mode set
+  *or* the server's proposal -- and the attribute keeps reading `VI_TRUE`. At
+  least it does not misreport the mode. VPP-4.3 §5.1.2: "If disabled, the
+  connection uses ‘Synchronous’ mode." NI and R&S both honour it, and
+  Keysight does when the server prefers synchronized.
 
 ### What the first vendor run settled
 

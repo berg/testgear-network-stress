@@ -113,6 +113,7 @@ SCRIPTS: tuple[Script, ...] = (
     Script("vxi11_conformance.py", only="vxi11"),
     Script("14_vxi11_flags.py", only="vxi11"),
     Script("11_hislip_messages.py", only="hislip"),
+    Script("18_hislip_modes.py", only="hislip"),
 )
 
 BY_NAME: dict[str, Script] = {s.name: s for s in SCRIPTS}

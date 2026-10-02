@@ -73,7 +73,9 @@ def restart_server() -> None:
     except Exception:  # noqa: BLE001
         pass
 
-    fresh = MockServer(proxy=old._proxy, portmap=was_portmapped).start()
+    fresh = MockServer(
+        proxy=old._proxy, portmap=was_portmapped, hislip_modes=old._hislip_modes
+    ).start()
     CTX["server"] = fresh
     CTX["resource"] = fresh.resource(CTX["protocol"])
 
